@@ -53,6 +53,50 @@ function pubpi_render_admin_page() {
             'name' => 'Up Binding Lorem',
             'main_file' => '' // Auto-détection
         ],
+        'NicolasCaen/up-variation-generator' => [
+            'name' => 'Up Variation Generator',
+            'main_file' => '' // Auto-détection
+        ],
+        'NicolasCaen/up-gutenberg-binding-collection' => [
+            'name' => 'Up Gutenberg Binding Collection',
+            'main_file' => '' // Auto-détection
+        ],
+        'NicolasCaen/up-gutenberg-bindings-interface' => [
+            'name' => 'Up Gutenberg Bindings Interface',
+            'main_file' => '' // Auto-détection
+        ],
+        'NicolasCaen/up-gutenberg-metabox' => [
+            'name' => 'Up Gutenberg Metabox',
+            'main_file' => '' // Auto-détection
+        ],
+        'NicolasCaen/up-library-generator' => [
+            'name' => 'Up Library Generator',
+            'main_file' => '' // Auto-détection
+        ],
+        'NicolasCaen/up-shortcodes-library' => [
+            'name' => 'Up Shortcodes Library',
+            'main_file' => '' // Auto-détection
+        ],
+        'NicolasCaen/up-section-styles' => [
+            'name' => 'Up Section Styles',
+            'main_file' => '' // Auto-détection
+        ],
+        'NicolasCaen/up-theme-generator' => [
+            'name' => 'Up Theme Generator',
+            'main_file' => '' // Auto-détection
+        ],
+        'NicolasCaen/up-gsap-animate' => [
+            'name' => 'Up GSAP Animate',
+            'main_file' => '' // Auto-détection
+        ],
+        'NicolasCaen/up-gsap-animate-2' => [
+            'name' => 'Up GSAP Animate 2',
+            'main_file' => '' // Auto-détection
+        ],
+        'NicolasCaen/up-wp-resize-admin-aside' => [
+            'name' => 'Up WP Resize Admin Aside',
+            'main_file' => '' // Auto-détection
+        ],
     ];
 
     // Thèmes GitHub (format: 'user/repo' => 'Nom du thème')
