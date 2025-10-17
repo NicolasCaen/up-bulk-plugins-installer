@@ -1,6 +1,6 @@
 # Up Bulk Plugin Installer
 
-Installe, active et met à jour automatiquement une sélection de plugins et de thèmes essentiels depuis WordPress.org ou GitHub, via une page d’administration dédiée.
+Installe, active et met à jour automatiquement une sélection de plugins, thèmes et fonctionnalités (patterns, snippets) essentiels depuis WordPress.org ou GitHub, via une page d’administration dédiée.
 
 ## Sommaire
 - [Fonctionnalités](#fonctionnalités)
@@ -10,6 +10,8 @@ Installe, active et met à jour automatiquement une sélection de plugins et de 
   - [Plugins WordPress.org](#plugins-wordpressorg)
   - [Plugins GitHub](#plugins-github)
   - [Thèmes GitHub](#thèmes-github)
+  - [Fonctionnalités GitHub](#fonctionnalités-github)
+  - [Patterns via manifest.json](#patterns-via-manifestjson)
 - [Mises à jour depuis GitHub](#mises-à-jour-depuis-github)
 - [Détection automatique du fichier principal](#détection-automatique-du-fichier-principal)
 - [Gestion des versions locales](#gestion-des-versions-locales)
@@ -24,6 +26,8 @@ Installe, active et met à jour automatiquement une sélection de plugins et de 
 - Indication de l’état actuel: installé/actif, installé/inactif, non installé.
 - Comparaison de version locale vs dernière release GitHub et bouton de mise à jour.
 - Activation rapide d’un plugin installé ou d’un thème installé.
+- Installation de fonctionnalités PHP GitHub directement dans `functions.php` (avec include automatique) ou dans `mu-plugins/`.
+- Support d’onglets multiples basés sur des `manifest.json` pour déployer des patterns front-end (fichiers JSON, CSS, JS, PHP, etc.) dans le thème actif.
 
 La page d’administration est disponible dans: `Tableau de bord > Installer Plugins`.
 
@@ -58,6 +62,37 @@ Accédez au menu `Installer Plugins` pour voir trois sections avec des tableaux 
 - États: ✅ actif, ⚠️ installé mais inactif, ou non installé.
 - Boutons: Installer, Activer, Mettre à jour (si une version plus récente est disponible).
 
+### Fonctionnalités GitHub
+- Table dédiée pour installer des fichiers PHP provenant de dépôts GitHub sélectionnés.
+- Deux options pour chaque fonctionnalité: copier dans le dossier `functions/` du thème actif (et ajout d’un `require_once` automatique dans `functions.php`), ou copier dans `wp-content/mu-plugins/` pour une activation globale.
+
+### Patterns via manifest.json
+- Chaque onglet manifest est défini dans le tableau `$github_manifest_tabs` du plugin et peut contenir plusieurs dépôts.
+- Pour chaque dépôt, le plugin lit `manifest.json` (structure `patterns`) et affiche les entrées `slug`, `name`, `description`, `categories`, `preview`, `files` et `install`.
+- Un clic sur “Installer dans le thème” télécharge le dépôt, copie les fichiers/dossiers indiqués vers les emplacement cibles (`patterns/`, `assets/css/`, `assets/js/`, `templates/`, etc.) du thème actif et affiche un récapitulatif des éléments copiés.
+- Les onglets peuvent être enrichis depuis un thème ou un plugin externe via le filtre `pubpi_manifest_tabs`.
+
+#### Ajouter des dépôts via le filtre `pubpi_manifest_tabs`
+
+Copiez ce snippet dans le `functions.php` de votre thème ou dans un plugin spécifique pour ajouter un onglet supplémentaire et son dépôt associé :
+
+```php
+add_filter('pubpi_manifest_tabs', function (array $tabs) {
+    $tabs['custom-library'] = [
+        'label' => 'Bibliothèque interne',
+        'manifests' => [
+            'organisation/patterns-repo' => [
+                'name' => 'Patterns internes',
+                'manifest' => 'build/manifest.json',
+                'branch' => 'main',
+            ],
+        ],
+    ];
+
+    return $tabs;
+});
+```
+
 ## Mises à jour depuis GitHub
 - Le plugin interroge `https://api.github.com/repos/{user}/{repo}/releases/latest`.
 - Si une release existe: téléchargement via `zipball_url` de la release la plus récente.
@@ -90,8 +125,9 @@ Pour les plugins GitHub, si le fichier principal n’est pas spécifié, le plug
 - Aucune release détectée: publier une release sur GitHub ou s’assurer que la branche `main`/`master` existe.
 - Fichier principal introuvable: vérifier que l’en-tête du plugin contient bien `Plugin Name`.
 - Problème de droits d’écriture: vérifier les permissions du système de fichiers sur `wp-content/plugins/` et `wp-content/themes/`.
+- Installation de pattern incomplète: vérifier que les chemins `files` et `install` du `manifest.json` correspondent à la structure réelle du dépôt et que le thème actif possède les sous-dossiers requis.
 
 ---
 
 Auteur: GEHIN Nicolas
-Version du plugin: 2.1
+Version du plugin: 1.2
