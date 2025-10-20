@@ -637,14 +637,22 @@ function pubpi_render_admin_page() {
                 echo '<td>' . (!empty($pattern_categories) ? esc_html(implode(', ', $pattern_categories)) : '&mdash;') . '</td>';
                 echo '<td><code>' . esc_html($repo) . '</code></td>';
                 echo '<td>';
-                echo '<form method="post" style="display:inline;">';
+                echo '<form method="post" class="pubpi-manifest-install-form" style="display:inline;">';
                 echo '<input type="hidden" name="pubpi_manifest_repo" value="' . esc_attr($repo) . '" />';
                 echo '<input type="hidden" name="pubpi_manifest_name" value="' . esc_attr($source_name) . '" />';
                 echo '<input type="hidden" name="pubpi_manifest_branch" value="' . esc_attr($branch) . '" />';
                 echo '<input type="hidden" name="pubpi_manifest_path" value="' . esc_attr($manifest_path) . '" />';
                 echo '<input type="hidden" name="pubpi_manifest_pattern" value="' . esc_attr($pattern_slug) . '" />';
                 echo '<input type="hidden" name="pubpi_manifest_table" value="' . esc_attr($manifest_key) . '" />';
-                submit_button('Installer dans le thème', 'secondary small', 'pubpi_install_manifest_pattern', false);
+                echo '<label class="screen-reader-text" for="pubpi_manifest_target_' . esc_attr($pattern_slug) . '">Destination</label>';
+                echo '<select id="pubpi_manifest_target_' . esc_attr($pattern_slug) . '" name="pubpi_manifest_target" class="pubpi-manifest-target-select">';
+                echo '<option value="theme">Thème actif</option>';
+                echo '<option value="mu-plugins">MU-Plugins</option>';
+                echo '<option value="plugins">Plugins</option>';
+                echo '</select>';
+                echo '<label class="screen-reader-text" for="pubpi_manifest_custom_path_' . esc_attr($pattern_slug) . '">Chemin personnalisé</label>';
+                echo '<input type="text" id="pubpi_manifest_custom_path_' . esc_attr($pattern_slug) . '" name="pubpi_manifest_custom_path" class="pubpi-manifest-custom-path" placeholder="/ressources/mon-plugin" />';
+                submit_button('Installer', 'secondary small', 'pubpi_install_manifest_pattern', false);
                 echo '</form>';
                 echo '</td></tr>';
             }
@@ -814,7 +822,9 @@ function pubpi_render_admin_page() {
         $manifest_branch = isset($_POST['pubpi_manifest_branch']) ? sanitize_text_field($_POST['pubpi_manifest_branch']) : 'main';
         $manifest_path = sanitize_text_field($_POST['pubpi_manifest_path']);
         $pattern_slug = sanitize_text_field($_POST['pubpi_manifest_pattern']);
-        pubpi_install_manifest_pattern($manifest_repo, $manifest_name, $manifest_branch, $manifest_path, $pattern_slug);
+        $target_location = isset($_POST['pubpi_manifest_target']) ? sanitize_text_field($_POST['pubpi_manifest_target']) : 'theme';
+        $custom_path = isset($_POST['pubpi_manifest_custom_path']) ? sanitize_text_field($_POST['pubpi_manifest_custom_path']) : '';
+        pubpi_install_manifest_pattern($manifest_repo, $manifest_name, $manifest_branch, $manifest_path, $pattern_slug, $target_location, $custom_path);
     }
 }
 
@@ -1007,7 +1017,7 @@ function pubpi_prepare_manifest_tabs($tabs_config) {
     return $prepared;
 }
 
-function pubpi_install_manifest_pattern($repo, $name, $branch, $manifest_path, $pattern_slug) {
+function pubpi_install_manifest_pattern($repo, $name, $branch, $manifest_path, $pattern_slug, $target_location = 'theme', $custom_path = '') {
     include_once ABSPATH . 'wp-admin/includes/file.php';
     include_once ABSPATH . 'wp-admin/includes/misc.php';
     include_once ABSPATH . 'wp-admin/includes/class-wp-upgrader.php';
@@ -1065,11 +1075,16 @@ function pubpi_install_manifest_pattern($repo, $name, $branch, $manifest_path, $
         return;
     }
 
-    $theme_dir = get_stylesheet_directory();
-    if (empty($theme_dir)) {
+    $base_dir = pubpi_resolve_install_base_dir($target_location);
+    if (is_wp_error($base_dir)) {
         pubpi_delete_directory($temp_dir);
-        echo '<div class="error notice"><p>❌ Impossible de déterminer le thème actif.</p></div>';
+        echo '<div class="error notice"><p>❌ ' . esc_html($base_dir->get_error_message()) . '</p></div>';
         return;
+    }
+
+    $custom_path = trim($custom_path);
+    if ($custom_path !== '') {
+        $custom_path = ltrim($custom_path, '/');
     }
 
     $installed_items = [];
@@ -1086,8 +1101,17 @@ function pubpi_install_manifest_pattern($repo, $name, $branch, $manifest_path, $
             return;
         }
 
-        $target_dir_rel = isset($installs[$key]) ? trim($installs[$key], '/') : '';
-        $target_dir = trailingslashit($theme_dir) . ($target_dir_rel !== '' ? $target_dir_rel . '/' : '');
+        $target_dir_rel = '';
+        if ($custom_path !== '') {
+            $target_dir_rel = $custom_path;
+        } elseif (isset($installs[$key]) && $installs[$key] !== '') {
+            $target_dir_rel = trim($installs[$key], '/');
+        }
+
+        $target_dir = trailingslashit($base_dir);
+        if ($target_dir_rel !== '') {
+            $target_dir .= trailingslashit($target_dir_rel);
+        }
 
         if (!wp_mkdir_p($target_dir)) {
             pubpi_delete_directory($temp_dir);
@@ -1102,7 +1126,7 @@ function pubpi_install_manifest_pattern($repo, $name, $branch, $manifest_path, $
                 echo '<div class="error notice"><p>❌ Erreur lors de la copie du dossier ' . esc_html($source_rel_path) . '.</p></div>';
                 return;
             }
-            $installed_items[] = ($target_dir_rel !== '' ? $target_dir_rel . '/' : '') . basename($source_path) . '/';
+            $installed_items[] = ($target_dir_rel !== '' ? trailingslashit($target_dir_rel) : '') . basename($source_path) . '/';
         } else {
             $destination_path = trailingslashit($target_dir) . basename($source_path);
             if (!pubpi_copy_file_with_fallback($source_path, $destination_path, true)) {
@@ -1110,7 +1134,7 @@ function pubpi_install_manifest_pattern($repo, $name, $branch, $manifest_path, $
                 echo '<div class="error notice"><p>❌ Erreur lors de la copie de ' . esc_html($source_rel_path) . '.</p></div>';
                 return;
             }
-            $installed_items[] = ($target_dir_rel !== '' ? $target_dir_rel . '/' : '') . basename($source_path);
+            $installed_items[] = ($target_dir_rel !== '' ? trailingslashit($target_dir_rel) : '') . basename($source_path);
         }
     }
 
@@ -1126,7 +1150,52 @@ function pubpi_install_manifest_pattern($repo, $name, $branch, $manifest_path, $
         $items_list = '';
     }
 
-    echo '<div class="updated notice"><p>✅ Le pattern "' . esc_html($pattern_slug) . '" de ' . esc_html($name) . ' a été installé dans le thème actif.' . $items_list . '</p></div>';
+    echo '<div class="updated notice"><p>✅ Le pattern "' . esc_html($pattern_slug) . '" de ' . esc_html($name) . ' a été installé dans ' . esc_html(pubpi_install_target_label($target_location, $custom_path)) . '.' . $items_list . '</p></div>';
+}
+
+function pubpi_resolve_install_base_dir($target_location) {
+    switch ($target_location) {
+        case 'mu-plugins':
+            $dir = WP_CONTENT_DIR . '/mu-plugins';
+            break;
+        case 'plugins':
+            $dir = WP_PLUGIN_DIR;
+            break;
+        case 'theme':
+        default:
+            $dir = get_stylesheet_directory();
+            if (empty($dir)) {
+                return new WP_Error('pubpi_missing_theme', 'Impossible de déterminer le thème actif.');
+            }
+            break;
+    }
+
+    if (!wp_mkdir_p($dir)) {
+        return new WP_Error('pubpi_unwritable_dir', 'Impossible de créer le dossier cible : ' . $dir);
+    }
+
+    return $dir;
+}
+
+function pubpi_install_target_label($target_location, $custom_path) {
+    $base_label = '';
+    switch ($target_location) {
+        case 'mu-plugins':
+            $base_label = 'MU-Plugins';
+            break;
+        case 'plugins':
+            $base_label = 'Plugins';
+            break;
+        default:
+            $base_label = 'le thème actif';
+            break;
+    }
+
+    if (!empty($custom_path)) {
+        return $base_label . ' dans ' . $custom_path;
+    }
+
+    return $base_label;
 }
 
 function pubpi_install_and_activate_plugin($plugin_path, $plugin_name) {
