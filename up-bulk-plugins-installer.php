@@ -332,6 +332,16 @@ function pubpi_render_admin_page() {
                 ],
             ],
         ],
+        'module-cpt' => [
+            'label' => 'CPT / TAXONOMIES (manifest)',
+            'manifests' => [
+                'NicolasCaen/up-module-cpt' => [
+                    'name' => 'Up module cpt',
+                    'manifest' => 'manifest.json',
+                    'branch' => 'Master',
+                ],
+            ],
+        ],
     ];
 
     $github_manifest_tabs = apply_filters('pubpi_manifest_tabs', $github_manifest_tabs);
