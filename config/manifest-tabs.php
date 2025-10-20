@@ -31,4 +31,34 @@ return [
             ],
         ],
     ],
+     'module-js' => [
+        'label' => 'Js',
+        'manifests' => [
+            'NicolasCaen/up-module-js' => [
+                'name' => 'Up module js',
+                'manifest' => 'manifest.json',
+                'branch' => 'Master',
+            ],
+        ],
+    ],
+     'module-php' => [
+        'label' => 'Php',
+        'manifests' => [
+            'NicolasCaen/up-module-php' => [
+                'name' => 'Up module php',
+                'manifest' => 'manifest.json',
+                'branch' => 'Master',
+            ],
+        ],
+    ],
+     'module-scss' => [
+        'label' => 'Scss',
+        'manifests' => [
+            'NicolasCaen/up-module-scss' => [
+                'name' => 'Up module scss',
+                'manifest' => 'manifest.json',
+                'branch' => 'Master',
+            ],
+        ],
+    ],
 ];
