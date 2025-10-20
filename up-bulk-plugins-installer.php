@@ -632,7 +632,13 @@ function pubpi_render_admin_page() {
                 } else {
                     echo '<td>&mdash;</td>';
                 }
-                echo '<td><strong>' . esc_html($pattern_name) . '</strong><br /><span style="color:#666;">' . esc_html($source_name) . '</span></td>';
+                $installation_status = pubpi_manifest_install_status($pattern, 'theme');
+
+                echo '<td><strong>' . esc_html($pattern_name) . '</strong><br /><span style="color:#666;">' . esc_html($source_name) . '</span>';
+                if (!empty($installation_status['installed'])) {
+                    echo '<br /><span class="pubpi-status-active" style="color:green;">✅ Déjà présent&nbsp;: ' . esc_html(implode(', ', $installation_status['installed'])) . '</span>';
+                }
+                echo '</td>';
                 echo '<td>' . (!empty($pattern_description) ? esc_html($pattern_description) : '&mdash;') . '</td>';
                 echo '<td>' . (!empty($pattern_categories) ? esc_html(implode(', ', $pattern_categories)) : '&mdash;') . '</td>';
                 echo '<td><code>' . esc_html($repo) . '</code></td>';
@@ -644,14 +650,21 @@ function pubpi_render_admin_page() {
                 echo '<input type="hidden" name="pubpi_manifest_path" value="' . esc_attr($manifest_path) . '" />';
                 echo '<input type="hidden" name="pubpi_manifest_pattern" value="' . esc_attr($pattern_slug) . '" />';
                 echo '<input type="hidden" name="pubpi_manifest_table" value="' . esc_attr($manifest_key) . '" />';
-                echo '<label class="screen-reader-text" for="pubpi_manifest_target_' . esc_attr($pattern_slug) . '">Destination</label>';
+                echo '<details class="pubpi-manifest-override" style="display:inline-block;margin-left:6px;">';
+                echo '<summary>Options avancées</summary>';
+                echo '<div class="pubpi-manifest-override-content">';
+                echo '<p class="description">Par défaut, le pattern est installé aux emplacements prévus par le manifest. Utilisez les options ci-dessous pour forcer une destination globale.</p>';
+                echo '<label for="pubpi_manifest_target_' . esc_attr($pattern_slug) . '">Destination globale</label>';
                 echo '<select id="pubpi_manifest_target_' . esc_attr($pattern_slug) . '" name="pubpi_manifest_target" class="pubpi-manifest-target-select">';
+                echo '<option value="">Défaut (manifest)</option>';
                 echo '<option value="theme">Thème actif</option>';
                 echo '<option value="mu-plugins">MU-Plugins</option>';
                 echo '<option value="plugins">Plugins</option>';
                 echo '</select>';
-                echo '<label class="screen-reader-text" for="pubpi_manifest_custom_path_' . esc_attr($pattern_slug) . '">Chemin personnalisé</label>';
+                echo '<label for="pubpi_manifest_custom_path_' . esc_attr($pattern_slug) . '">Chemin personnalisé</label>';
                 echo '<input type="text" id="pubpi_manifest_custom_path_' . esc_attr($pattern_slug) . '" name="pubpi_manifest_custom_path" class="pubpi-manifest-custom-path" placeholder="/ressources/mon-plugin" />';
+                echo '</div>';
+                echo '</details>';
                 submit_button('Installer', 'secondary small', 'pubpi_install_manifest_pattern', false);
                 echo '</form>';
                 echo '</td></tr>';
@@ -847,6 +860,51 @@ function pubpi_get_item_categories($item) {
         }
     }
     return $normalized;
+}
+
+function pubpi_manifest_install_status($pattern, $target_location = 'theme') {
+    $status = [
+        'installed' => [],
+        'missing' => [],
+    ];
+
+    if (empty($pattern['files']) || !is_array($pattern['files'])) {
+        return $status;
+    }
+
+    $base_dir = pubpi_resolve_install_base_dir($target_location, false);
+    if (is_wp_error($base_dir)) {
+        return $status;
+    }
+
+    $installs = isset($pattern['install']) && is_array($pattern['install']) ? $pattern['install'] : [];
+
+    foreach ($pattern['files'] as $key => $source_rel_path) {
+        if (!is_string($source_rel_path) || $source_rel_path === '') {
+            continue;
+        }
+
+        $target_dir_rel = '';
+        if (isset($installs[$key]) && $installs[$key] !== '') {
+            $target_dir_rel = trim($installs[$key], '/');
+        }
+
+        $target_dir = trailingslashit($base_dir);
+        if ($target_dir_rel !== '') {
+            $target_dir .= trailingslashit($target_dir_rel);
+        }
+
+        $candidate_path = $target_dir . basename($source_rel_path);
+        $display_path = ($target_dir_rel !== '' ? trailingslashit($target_dir_rel) : '') . basename($source_rel_path);
+
+        if (file_exists($candidate_path) || is_dir($candidate_path)) {
+            $status['installed'][] = $display_path;
+        } else {
+            $status['missing'][] = $display_path;
+        }
+    }
+
+    return $status;
 }
 
 function pubpi_extract_categories($items) {
@@ -1075,6 +1133,10 @@ function pubpi_install_manifest_pattern($repo, $name, $branch, $manifest_path, $
         return;
     }
 
+    if ($target_location === '') {
+        $target_location = 'theme';
+    }
+
     $base_dir = pubpi_resolve_install_base_dir($target_location);
     if (is_wp_error($base_dir)) {
         pubpi_delete_directory($temp_dir);
@@ -1153,7 +1215,7 @@ function pubpi_install_manifest_pattern($repo, $name, $branch, $manifest_path, $
     echo '<div class="updated notice"><p>✅ Le pattern "' . esc_html($pattern_slug) . '" de ' . esc_html($name) . ' a été installé dans ' . esc_html(pubpi_install_target_label($target_location, $custom_path)) . '.' . $items_list . '</p></div>';
 }
 
-function pubpi_resolve_install_base_dir($target_location) {
+function pubpi_resolve_install_base_dir($target_location, $create = true) {
     switch ($target_location) {
         case 'mu-plugins':
             $dir = WP_CONTENT_DIR . '/mu-plugins';
@@ -1170,8 +1232,12 @@ function pubpi_resolve_install_base_dir($target_location) {
             break;
     }
 
-    if (!wp_mkdir_p($dir)) {
-        return new WP_Error('pubpi_unwritable_dir', 'Impossible de créer le dossier cible : ' . $dir);
+    if ($create) {
+        if (!wp_mkdir_p($dir)) {
+            return new WP_Error('pubpi_unwritable_dir', 'Impossible de créer le dossier cible : ' . $dir);
+        }
+    } elseif (!file_exists($dir)) {
+        return new WP_Error('pubpi_missing_dir', 'Le dossier cible est introuvable : ' . $dir);
     }
 
     return $dir;
