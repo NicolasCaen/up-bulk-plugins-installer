@@ -321,28 +321,8 @@ function pubpi_render_admin_page() {
     ];
 
     // Bibliothèques de patterns via manifest.json (groupées par onglet)
-    $github_manifest_tabs = [
-        'patterns' => [
-            'label' => 'Patterns (manifest)',
-            'manifests' => [
-                'NicolasCaen/up-patterns' => [
-                    'name' => 'Up Patterns',
-                    'manifest' => 'manifest.json',
-                    'branch' => 'Master',
-                ],
-            ],
-        ],
-        'module-cpt' => [
-            'label' => 'CPT / TAXONOMIES (manifest)',
-            'manifests' => [
-                'NicolasCaen/up-module-cpt' => [
-                    'name' => 'Up module cpt',
-                    'manifest' => 'manifest.json',
-                    'branch' => 'Master',
-                ],
-            ],
-        ],
-    ];
+    $manifest_tabs_config = __DIR__ . '/config/manifest-tabs.php';
+    $github_manifest_tabs = file_exists( $manifest_tabs_config ) ? include $manifest_tabs_config : [];
 
     $github_manifest_tabs = apply_filters('pubpi_manifest_tabs', $github_manifest_tabs);
 
