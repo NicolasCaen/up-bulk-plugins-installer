@@ -566,39 +566,9 @@ function pubpi_render_admin_page() {
     echo '<div id="pubpi-tab-sets" class="pubpi-tab-panel">';
     echo '<h2>Sets d’éléments</h2>';
     echo '<p>Enregistrez des sélections d’éléments afin de les réinstaller rapidement sur d’autres sites.</p>';
-    echo '<div class="pubpi-sets-load">';
-    echo '<label for="pubpi-load-set-select">Charger un set existant&nbsp;:</label>';
-    echo '<select id="pubpi-load-set-select" class="pubpi-set-select">';
-    echo '<option value="">— Sélectionner —</option>';
-    foreach ($saved_sets as $set_entry) {
-        echo '<option value="' . esc_attr($set_entry['slug']) . '">' . esc_html($set_entry['name']) . '</option>';
-    }
-    echo '</select>';
-    echo '<button type="button" class="button" id="pubpi-load-set-button">Charger</button>';
-    echo '</div>';
-
-    echo '<form method="post" id="pubpi-set-form" class="pubpi-set-form">';
-    echo '<div class="pubpi-set-fields">';
-    echo '<label for="pubpi-set-slug">Slug du set</label>';
-    echo '<input type="text" id="pubpi-set-slug" name="pubpi_set_slug" class="regular-text" />';
-    echo '<label for="pubpi-set-name">Nom du set</label>';
-    echo '<input type="text" id="pubpi-set-name" name="pubpi_set_name" class="regular-text" />';
-    echo '<label for="pubpi-set-manifest-default">Destination par défaut des patterns manifest</label>';
-    echo '<select id="pubpi-set-manifest-default" name="pubpi_set_manifest_default" class="pubpi-set-select">';
-    echo '<option value="">Défaut (manifest)</option>';
-    echo '<option value="theme">Thème actif</option>';
-    echo '<option value="mu-plugins">MU-Plugins</option>';
-    echo '<option value="plugins">Plugins</option>';
-    echo '</select>';
-    echo '</div>';
-
-    echo '<p class="description">Sélectionnez les éléments directement dans les onglets correspondants grâce aux cases à cocher et vidétes lignes pour ce set.</p>';
-
-    echo '<input type="hidden" name="pubpi_set_payload" value="" />';
-    submit_button('Enregistrer le set', 'primary', 'pubpi_save_set', false);
-    echo '</form>';
-
+    echo '<div class="pubpi-sets-section">';
     if (!empty($saved_sets)) {
+        echo '<div class="pubpi-sets-table-wrapper">';
         echo '<h3>Sets enregistrés</h3>';
         echo '<table class="widefat fixed striped pubpi-sets-table"><thead><tr><th>Nom</th><th>Slug</th><th>Éléments</th><th>Action</th></tr></thead><tbody>';
         foreach ($saved_sets as $set_entry) {
@@ -613,8 +583,44 @@ function pubpi_render_admin_page() {
             echo '</tr>';
         }
         echo '</tbody></table>';
+        echo '</div>';
     }
 
+    echo '<div class="pubpi-sets-load">';
+    echo '<label for="pubpi-load-set-select">Charger un set existant&nbsp;:</label>';
+    echo '<select id="pubpi-load-set-select" class="pubpi-set-select">';
+    echo '<option value="">— Sélectionner —</option>';
+    foreach ($saved_sets as $set_entry) {
+        echo '<option value="' . esc_attr($set_entry['slug']) . '">' . esc_html($set_entry['name']) . '</option>';
+    }
+    echo '</select>';
+    echo '<button type="button" class="button" id="pubpi-load-set-button">Charger</button>';
+    echo '</div>';
+
+    echo '<form method="post" id="pubpi-set-form" class="pubpi-set-form">';
+    echo '<h3 class="pubpi-set-form-title">Créer un nouveau set</h3>';
+    echo '<p class="description pubpi-set-note">Sélectionnez les éléments directement dans les onglets correspondants grâce aux cases à cocher ils seront ajoutés au set.</p>';
+
+    echo '<div class="pubpi-set-fields">';
+    echo '<label for="pubpi-set-slug">Slug du set</label>';
+    echo '<input type="text" id="pubpi-set-slug" name="pubpi_set_slug" class="regular-text" />';
+    echo '<label for="pubpi-set-name">Nom du set</label>';
+    echo '<input type="text" id="pubpi-set-name" name="pubpi_set_name" class="regular-text" />';
+    echo '<label for="pubpi-set-manifest-default">Destination par défaut des patterns manifest</label>';
+    echo '<select id="pubpi-set-manifest-default" name="pubpi_set_manifest_default" class="pubpi-set-select">';
+    echo '<option value="">Défaut (manifest)</option>';
+    echo '<option value="theme">Thème actif</option>';
+    echo '<option value="mu-plugins">MU-Plugins</option>';
+    echo '<option value="plugins">Plugins</option>';
+    echo '</select>';
+    echo '</div>';
+
+
+    echo '<input type="hidden" name="pubpi_set_payload" value="" />';
+    submit_button('Enregistrer le set', 'primary', 'pubpi_save_set', false);
+    echo '</form>';
+
+    echo '</div>';
     echo '<script type="application/json" id="pubpi-saved-sets-data">' . wp_json_encode($saved_sets) . '</script>';
     echo '</div>';
 
@@ -957,6 +963,15 @@ function pubpi_render_admin_page() {
 .pubpi-set-cell { width: 30px; text-align: center; white-space: nowrap; }
 .pubpi-set-cell .pubpi-set-option { display: flex; flex-direction: column; align-items: center; gap: 2px; font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: #2271b1; }
 .pubpi-set-cell .pubpi-set-option input { margin: 0; }
+.pubpi-sets-section { display: grid; gap: 24px; margin-top: 16px; }
+.pubpi-sets-table-wrapper { overflow-x: auto; }
+.pubpi-sets-load { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+.pubpi-sets-load label { font-weight: 600; }
+.pubpi-set-form { display: grid; gap: 18px; margin-top: 8px; padding: 16px; border: 1px solid #dcdcde; background: #f7f7f7; border-radius: 4px; }
+.pubpi-set-fields { display: grid; gap: 12px; max-width: 420px; }
+.pubpi-set-fields label { font-weight: 600; }
+.pubpi-set-note { margin: 0; }
+.pubpi-set-form-title { margin: 0; font-size: 1.2em; }
 </style>';
     echo '<script type="text/javascript">';
     echo <<<'JS'
