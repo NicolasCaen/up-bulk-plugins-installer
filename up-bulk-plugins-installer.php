@@ -10,6 +10,277 @@ if (!defined('ABSPATH')) {
     exit;
 }
 
+// =============================
+// Generators storage utilities
+// =============================
+
+function pubpi_get_generators_directory() {
+    return trailingslashit(__DIR__ . '/config/file-generators');
+}
+
+function pubpi_ensure_generators_directory() {
+    $dir = pubpi_get_generators_directory();
+    if (!is_dir($dir)) {
+        if (!wp_mkdir_p($dir)) {
+            return new WP_Error('pubpi_generators_dir', 'Impossible de créer le dossier des générateurs.');
+        }
+    }
+    return $dir;
+}
+
+function pubpi_list_saved_generators() {
+    $dir = pubpi_ensure_generators_directory();
+    if (is_wp_error($dir)) {
+        return [];
+    }
+    $out = [];
+    $files = glob(trailingslashit($dir) . '*.json');
+    if ($files) {
+        foreach ($files as $file) {
+            $json = file_get_contents($file);
+            if ($json === false) continue;
+            $cfg = json_decode($json, true);
+            if (!is_array($cfg)) continue;
+            $slug = basename($file, '.json');
+            $cfg['slug'] = $cfg['slug'] ?? $slug;
+            $cfg['name'] = $cfg['name'] ?? $slug;
+            $out[] = $cfg;
+        }
+    }
+    usort($out, function($a,$b){ return strcmp($a['slug'],$b['slug']); });
+    return $out;
+}
+
+function pubpi_save_generator_config($gen) {
+    $dir = pubpi_ensure_generators_directory();
+    if (is_wp_error($dir)) return $dir;
+    $slug = sanitize_title($gen['slug'] ?? '');
+    if ($slug === '') return new WP_Error('pubpi_gen_slug', 'Slug du générateur requis.');
+    $payload = [
+        'slug' => $slug,
+        'name' => sanitize_text_field($gen['name'] ?? $slug),
+        'type' => sanitize_text_field($gen['type'] ?? ''),
+        'destination' => sanitize_text_field($gen['destination'] ?? 'theme'),
+        'source_dir' => ltrim(sanitize_text_field($gen['source_dir'] ?? ''), '/'),
+        'target_file' => ltrim(sanitize_text_field($gen['target_file'] ?? ''), '/'),
+        'handle' => sanitize_text_field($gen['handle'] ?? ''),
+        'deps' => array_values(array_filter(array_map('sanitize_text_field', (array)($gen['deps'] ?? [])))),
+        'in_footer' => !empty($gen['in_footer']) ? true : false,
+        'created_at' => current_time('mysql'),
+        'updated_at' => current_time('mysql'),
+    ];
+    if ($payload['type'] === '' || $payload['source_dir'] === '' || $payload['target_file'] === '') {
+        return new WP_Error('pubpi_gen_fields', 'Champs du générateur incomplets.');
+    }
+    $path = trailingslashit($dir) . $slug . '.json';
+    $json = wp_json_encode($payload, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE);
+    if ($json === false) return new WP_Error('pubpi_gen_encode', 'Encodage JSON impossible.');
+    if (file_put_contents($path, $json) === false) return new WP_Error('pubpi_gen_write', 'Écriture du générateur impossible.');
+    return $payload;
+}
+
+function pubpi_delete_generator_config($slug) {
+    $dir = pubpi_ensure_generators_directory();
+    if (is_wp_error($dir)) return false;
+    $path = trailingslashit($dir) . sanitize_title($slug) . '.json';
+    if (file_exists($path)) return @unlink($path);
+    return false;
+}
+
+function pubpi_load_generator_config($slug) {
+    $dir = pubpi_ensure_generators_directory();
+    if (is_wp_error($dir)) return $dir;
+    $path = trailingslashit($dir) . sanitize_title($slug) . '.json';
+    if (!file_exists($path)) return new WP_Error('pubpi_gen_missing', 'Générateur introuvable.');
+    $json = file_get_contents($path);
+    if ($json === false) return new WP_Error('pubpi_gen_read', 'Lecture générateur impossible.');
+    $cfg = json_decode($json, true);
+    if (!is_array($cfg)) return new WP_Error('pubpi_gen_json', 'JSON générateur invalide.');
+    return $cfg;
+}
+
+function pubpi_resolve_base_dir_and_uri($destination) {
+    switch ($destination) {
+        case 'mu-plugins':
+            return [WPMU_PLUGIN_DIR, content_url('mu-plugins')];
+        case 'plugins':
+            return [WP_PLUGIN_DIR, content_url('plugins')];
+        case 'theme':
+        default:
+            return [get_stylesheet_directory(), get_stylesheet_directory_uri()];
+    }
+}
+
+function pubpi_scan_files_recursive($directory, $extensions = []) {
+    $files = [];
+    if (!is_dir($directory)) return $files;
+    $it = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($directory, FilesystemIterator::SKIP_DOTS));
+    foreach ($it as $fileInfo) {
+        if (!$fileInfo->isFile()) continue;
+        $path = $fileInfo->getPathname();
+        if (!empty($extensions)) {
+            $ext = strtolower(pathinfo($path, PATHINFO_EXTENSION));
+            if (!in_array($ext, $extensions, true)) continue;
+        }
+        $files[] = $path;
+    }
+    sort($files);
+    return $files;
+}
+
+function pubpi_ensure_marker_block($target_file, $block_key, $lines) {
+    $start = "/* ----- {$block_key} ----- */";
+    $end = "/* ----- {$block_key} fin ----- */";
+    $contents = file_exists($target_file) ? file_get_contents($target_file) : '';
+    if ($contents === false) return new WP_Error('pubpi_marker_read', 'Impossible de lire le fichier cible.');
+    $normalized = str_replace(["\r\n","\r"], "\n", (string)$contents);
+    if ($normalized === '') {
+        $normalized = '';
+    }
+    $block = $start . "\n" . implode("\n", $lines) . "\n" . $end . "\n";
+    if (strpos($normalized, $start) === false || strpos($normalized, $end) === false) {
+        // prepend block
+        $new = $block . $normalized;
+        if (!pubpi_write_file_with_fallback($target_file, $new)) return new WP_Error('pubpi_marker_write', 'Écriture du bloc impossible.');
+        return count($lines);
+    }
+    // Update existing block with de-dup by inserting missing lines just after start
+    $before = substr($normalized, 0, strpos($normalized, $start) + strlen($start));
+    $afterStartPos = strpos($normalized, $start) + strlen($start);
+    $afterEndPos = strpos($normalized, $end);
+    $middle = substr($normalized, $afterStartPos, $afterEndPos - $afterStartPos);
+    $middleLines = array_values(array_filter(array_map('trim', explode("\n", $middle))));
+    $added = 0;
+    foreach (array_reverse($lines) as $line) { // insert at top (after start), preserve manual order
+        if (!in_array(trim($line), $middleLines, true)) {
+            array_unshift($middleLines, trim($line));
+            $added++;
+        }
+    }
+    $newMiddle = "\n" . implode("\n", $middleLines) . "\n";
+    $new = $before . $newMiddle . substr($normalized, $afterEndPos);
+    if (!pubpi_write_file_with_fallback($target_file, $new)) return new WP_Error('pubpi_marker_write', 'Mise à jour du bloc impossible.');
+    return $added;
+}
+
+function pubpi_run_generator_by_slug($slug) {
+    $cfg = pubpi_load_generator_config($slug);
+    if (is_wp_error($cfg)) return $cfg;
+    list($base_dir, $base_uri) = pubpi_resolve_base_dir_and_uri($cfg['destination'] ?? 'theme');
+    if (empty($base_dir)) return new WP_Error('pubpi_gen_base', 'Base introuvable pour la destination.');
+    $source_dir = trailingslashit($base_dir) . ltrim($cfg['source_dir'], '/');
+    $target_file = trailingslashit($base_dir) . ltrim($cfg['target_file'], '/');
+    if (!is_dir(dirname($target_file))) {
+        if (!wp_mkdir_p(dirname($target_file))) return new WP_Error('pubpi_gen_target_dir', 'Impossible de créer le dossier cible.');
+    }
+    if (!file_exists($target_file)) {
+        if (!pubpi_write_file_with_fallback($target_file, "")) return new WP_Error('pubpi_gen_touch', 'Impossible de créer le fichier cible.');
+    }
+
+    $exts = [];
+    $block_key = $cfg['type'];
+    if ($cfg['type'] === 'php_include') $exts = ['php'];
+    if ($cfg['type'] === 'scss_import') $exts = ['scss'];
+    if ($cfg['type'] === 'js_register' || $cfg['type'] === 'js_enqueue') $exts = ['js'];
+
+    $files = pubpi_scan_files_recursive($source_dir, $exts);
+    $lines = [];
+
+    $target_real = realpath($target_file) ?: $target_file;
+    foreach ($files as $abs) {
+        // Do not import/include the target file itself
+        $abs_real = realpath($abs) ?: $abs;
+        if ($abs_real === $target_real) {
+            continue;
+        }
+        $rel_from_base = ltrim(str_replace(trailingslashit($base_dir), '', $abs), '/');
+        switch ($cfg['type']) {
+            case 'php_include':
+                if ($cfg['destination'] === 'theme') {
+                    $lines[] = "require_once get_stylesheet_directory() . '/" . $rel_from_base . "';";
+                } elseif ($cfg['destination'] === 'plugins') {
+                    $lines[] = "require_once WP_PLUGIN_DIR . '/" . $rel_from_base . "';";
+                } else {
+                    $lines[] = "require_once WPMU_PLUGIN_DIR . '/" . $rel_from_base . "';";
+                }
+                break;
+            case 'scss_import':
+                // only partials: basename must start with '_'
+                $bn = basename($abs);
+                if ($bn === basename($target_file)) {
+                    break;
+                }
+                if (substr($bn, 0, 1) !== '_') {
+                    break; // skip non-partial .scss
+                }
+                // path relative to target file directory
+                $rel_to_target = ltrim(str_replace(trailingslashit(dirname($target_file)), '', $abs), '/');
+                $rel_to_target = str_replace("\\", '/', $rel_to_target);
+                // strip .scss extension
+                if (substr($rel_to_target, -5) === '.scss') {
+                    $rel_to_target = substr($rel_to_target, 0, -5);
+                }
+                $rel_segments = explode('/', $rel_to_target);
+                $last_segment = array_pop($rel_segments);
+                if (substr($last_segment, 0, 1) === '_') {
+                    $last_segment = substr($last_segment, 1);
+                }
+                $rel_clean = trim(($rel_segments ? implode('/', $rel_segments) . '/' : '') . $last_segment, '/');
+                if ($rel_clean !== '') {
+                    $lines[] = "@import '" . $rel_clean . "';";
+                }
+                break;
+            case 'js_register':
+            case 'js_enqueue':
+                $handle_base = $cfg['handle'] !== '' ? sanitize_title($cfg['handle']) : 'pubpi-script';
+                $file_slug = sanitize_title(basename($abs, '.js'));
+                $handle = $handle_base . '-' . $file_slug;
+                $deps = isset($cfg['deps']) ? array_values(array_filter((array)$cfg['deps'])) : [];
+                $deps_php = "['" . implode("','", array_map('esc_js', $deps)) . "']";
+                $url = rtrim($base_uri, '/') . '/' . $rel_from_base;
+                if ($cfg['type'] === 'js_register') {
+                    $lines[] = "wp_register_script('{$handle}', '" . $url . "', {$deps_php}, null, " . (!empty($cfg['in_footer']) ? 'true' : 'false') . ");";
+                } else {
+                    $lines[] = "wp_enqueue_script('{$handle}', '" . $url . "', {$deps_php}, null, " . (!empty($cfg['in_footer']) ? 'true' : 'false') . ");";
+                }
+                break;
+        }
+    }
+
+    // For JS, wrap with add_action to ensure execution
+    if ($cfg['type'] === 'js_register' || $cfg['type'] === 'js_enqueue') {
+        if (!empty($lines)) {
+            array_unshift($lines, "add_action('wp_enqueue_scripts', function() {" );
+            $lines[] = "}, 10);";
+        }
+    }
+
+    return pubpi_ensure_marker_block($target_file, $block_key, $lines);
+}
+
+function pubpi_write_file_with_fallback($path, $contents) {
+    // Try WP_Filesystem first
+    if (!function_exists('WP_Filesystem')) {
+        require_once ABSPATH . 'wp-admin/includes/file.php';
+    }
+    WP_Filesystem();
+    global $wp_filesystem;
+    if ($wp_filesystem && is_object($wp_filesystem)) {
+        $dir = dirname($path);
+        if (!is_dir($dir)) {
+            if (!wp_mkdir_p($dir)) return false;
+        }
+        $ok = $wp_filesystem->put_contents($path, $contents, FS_CHMOD_FILE);
+        if ($ok) return true;
+    }
+    // Fallback to direct file_put_contents
+    $dir = dirname($path);
+    if (!is_dir($dir)) {
+        if (!wp_mkdir_p($dir)) return false;
+    }
+    return file_put_contents($path, $contents) !== false;
+}
+
 function pubpi_register_rest_routes() {
     register_rest_route(
         'up-bulk-plugins-installer/v1',
@@ -497,6 +768,7 @@ function pubpi_render_admin_page() {
         echo '<a href="#' . esc_attr($manifest_tab_id) . '" class="nav-tab">' . esc_html($manifest_tab['label']) . '</a>';
     }
     echo '<a href="#pubpi-tab-features" class="nav-tab">Fonctionnalités</a>';
+    echo '<a href="#pubpi-tab-generators" class="nav-tab">Générateurs</a>';
     echo '<a href="#pubpi-tab-sets" class="nav-tab">Sets</a>';
     echo '</h2>';
 
@@ -622,6 +894,89 @@ function pubpi_render_admin_page() {
 
     echo '</div>';
     echo '<script type="application/json" id="pubpi-saved-sets-data">' . wp_json_encode($saved_sets) . '</script>';
+    echo '</div>';
+
+    // Tab: Generators
+    $saved_generators = pubpi_list_saved_generators();
+    echo '<div id="pubpi-tab-generators" class="pubpi-tab-panel">';
+    echo '<h2>Générateurs de fichiers</h2>';
+    echo '<p>Automatisez la création de fichiers d\'agrégation: includes PHP, imports SCSS, register/enqueue scripts JS.</p>';
+    echo '<table class="widefat fixed striped"><thead><tr><th class="pubpi-set-col">Add set</th><th>Nom</th><th>Type</th><th>Destination</th><th>Source</th><th>Fichier cible</th><th>Action</th></tr></thead><tbody>';
+    if (!empty($saved_generators)) {
+        foreach ($saved_generators as $gen) {
+            $dest = $gen['destination'] ?? '';
+            $type = $gen['type'] ?? '';
+            $source = $gen['source_dir'] ?? '';
+            $target = $gen['target_file'] ?? '';
+            echo '<tr>';
+            echo '<td class="pubpi-set-cell"><label class="pubpi-set-option"><input type="checkbox" class="pubpi-set-item" data-type="file_generator" data-generator-slug="' . esc_attr($gen['slug']) . '"> </label></td>';
+            echo '<td><strong>' . esc_html($gen['name']) . '</strong><br><code>' . esc_html($gen['slug']) . '</code></td>';
+            echo '<td>' . esc_html($type) . '</td>';
+            echo '<td>' . esc_html($dest) . '</td>';
+            echo '<td><code>' . esc_html($source) . '</code></td>';
+            echo '<td><code>' . esc_html($target) . '</code></td>';
+            echo '<td>';
+            echo '<form method="post" style="display:inline-block; margin-right:6px;"><input type="hidden" name="pubpi_generator_slug" value="' . esc_attr($gen['slug']) . '">';
+            submit_button('Générer', 'secondary small', 'pubpi_run_generator', false);
+            echo '</form>';
+            echo '<form method="post" style="display:inline-block;"><input type="hidden" name="pubpi_generator_slug" value="' . esc_attr($gen['slug']) . '">';
+            submit_button('Supprimer', 'link-delete', 'pubpi_delete_generator', false);
+            echo '</form>';
+            echo '</td>';
+            echo '</tr>';
+        }
+    } else {
+        echo '<tr><td colspan="7">Aucun générateur enregistré.</td></tr>';
+    }
+    echo '</tbody></table>';
+
+    echo '<div class="pubpi-generators-load">';
+    echo '<label for="pubpi-load-generator-select">Charger un générateur existant&nbsp;:</label>';
+    echo '<select id="pubpi-load-generator-select" class="pubpi-set-select">';
+    echo '<option value="">— Sélectionner —</option>';
+    foreach ($saved_generators as $gen) {
+        $option_data = wp_json_encode($gen, JSON_UNESCAPED_UNICODE);
+        echo '<option value="' . esc_attr($gen['slug']) . '" data-generator="' . esc_attr($option_data) . '">' . esc_html($gen['name'] ?? $gen['slug']) . '</option>';
+    }
+    echo '</select>';
+    echo '<button type="button" class="button" id="pubpi-load-generator-button">Charger</button>';
+    echo '<button type="button" class="button" id="pubpi-reset-generator-button">Réinitialiser</button>';
+    echo '</div>';
+
+    echo '<h3>Créer ou modifier un générateur</h3>';
+    echo '<form method="post" class="pubpi-set-form" id="pubpi-generator-form">';
+    echo '<div class="pubpi-set-fields">';
+    echo '<label for="pubpi-gen-name">Nom</label>';
+    echo '<input type="text" id="pubpi-gen-name" name="pubpi_gen_name" class="regular-text" />';
+    echo '<label for="pubpi-gen-slug">Slug</label>';
+    echo '<input type="text" id="pubpi-gen-slug" name="pubpi_gen_slug" class="regular-text" />';
+    echo '<label for="pubpi-gen-type">Type</label>';
+    echo '<select id="pubpi-gen-type" name="pubpi_gen_type" class="pubpi-set-select">';
+    echo '<option value="php_include">PHP include</option>';
+    echo '<option value="scss_import">SCSS import</option>';
+    echo '<option value="js_register">JS register</option>';
+    echo '<option value="js_enqueue">JS enqueue</option>';
+    echo '</select>';
+    echo '<label for="pubpi-gen-dest">Destination</label>';
+    echo '<select id="pubpi-gen-dest" name="pubpi_gen_destination" class="pubpi-set-select">';
+    echo '<option value="theme">Thème actif</option>';
+    echo '<option value="mu-plugins">MU-Plugins</option>';
+    echo '<option value="plugins">Plugins</option>';
+    echo '</select>';
+    echo '<label for="pubpi-gen-source">Dossier source (relatif)</label>';
+    echo '<input type="text" id="pubpi-gen-source" name="pubpi_gen_source" class="regular-text" placeholder="ex: assets/scss/blocks" />';
+    echo '<label for="pubpi-gen-target">Fichier cible (relatif)</label>';
+    echo '<input type="text" id="pubpi-gen-target" name="pubpi_gen_target" class="regular-text" placeholder="ex: assets/scss/root.scss ou inc/includes.php" />';
+    echo '<label for="pubpi-gen-handle">Handle (JS)</label>';
+    echo '<input type="text" id="pubpi-gen-handle" name="pubpi_gen_handle" class="regular-text" placeholder="ex: theme-scripts" />';
+    echo '<label for="pubpi-gen-deps">Dépendances (JS, CSV)</label>';
+    echo '<input type="text" id="pubpi-gen-deps" name="pubpi_gen_deps" class="regular-text" placeholder="ex: jquery,wp-element" />';
+    echo '<label><input type="checkbox" name="pubpi_gen_in_footer" id="pubpi-gen-in-footer" value="1" /> Charger en footer (JS)</label>';
+    echo '<input type="hidden" id="pubpi-gen-original" name="pubpi_gen_original_slug" value="" />';
+    echo '</div>';
+    submit_button('Enregistrer le générateur', 'primary', 'pubpi_save_generator', false);
+    echo '</form>';
+
     echo '</div>';
 
     // Tab: GitHub Plugins
@@ -967,6 +1322,8 @@ function pubpi_render_admin_page() {
 .pubpi-sets-table-wrapper { overflow-x: auto; }
 .pubpi-sets-load { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
 .pubpi-sets-load label { font-weight: 600; }
+.pubpi-generators-load { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin: 16px 0; }
+.pubpi-generators-load label { font-weight: 600; }
 .pubpi-set-form { display: grid; gap: 18px; margin-top: 8px; padding: 16px; border: 1px solid #dcdcde; background: #f7f7f7; border-radius: 4px; }
 .pubpi-set-fields { display: grid; gap: 12px; max-width: 420px; }
 .pubpi-set-fields label { font-weight: 600; }
@@ -1054,6 +1411,105 @@ function pubpi_render_admin_page() {
         var payloadInput = setForm ? setForm.querySelector("input[name='pubpi_set_payload']") : null;
         var loadButton = document.getElementById("pubpi-load-set-button");
         var loadSelect = document.getElementById("pubpi-load-set-select");
+        var savedGeneratorsData = document.getElementById("pubpi-saved-generators-data");
+        var savedGenerators = savedGeneratorsData ? JSON.parse(savedGeneratorsData.textContent || "[]") : [];
+        var generatorSelect = document.getElementById("pubpi-load-generator-select");
+        var generatorLoadBtn = document.getElementById("pubpi-load-generator-button");
+        var generatorResetBtn = document.getElementById("pubpi-reset-generator-button");
+        var generatorForm = document.getElementById("pubpi-generator-form");
+        var genNameField = document.getElementById("pubpi-gen-name");
+        var genSlugField = document.getElementById("pubpi-gen-slug");
+        var genTypeField = document.getElementById("pubpi-gen-type");
+        var genDestField = document.getElementById("pubpi-gen-dest");
+        var genSourceField = document.getElementById("pubpi-gen-source");
+        var genTargetField = document.getElementById("pubpi-gen-target");
+        var genHandleField = document.getElementById("pubpi-gen-handle");
+        var genDepsField = document.getElementById("pubpi-gen-deps");
+        var genFooterField = document.getElementById("pubpi-gen-in-footer");
+        var genOriginalField = document.getElementById("pubpi-gen-original");
+
+        function normalizeGeneratorData(source) {
+            if (!source) return null;
+            if (typeof source === 'string') {
+                try {
+                    return JSON.parse(source);
+                } catch (e) {
+                    return null;
+                }
+            }
+            return source;
+        }
+
+        function fillGeneratorForm(generator) {
+            if (!generatorForm || !generator) return;
+            if (genNameField) genNameField.value = generator.name || generator.slug || "";
+            if (genSlugField) genSlugField.value = generator.slug || "";
+            if (genTypeField) genTypeField.value = generator.type || "php_include";
+            if (genDestField) genDestField.value = generator.destination || "theme";
+            if (genSourceField) genSourceField.value = generator.source_dir || "";
+            if (genTargetField) genTargetField.value = generator.target_file || "";
+            if (genHandleField) genHandleField.value = generator.handle || "";
+            if (genDepsField) {
+                if (Array.isArray(generator.deps)) {
+                    genDepsField.value = generator.deps.join(',');
+                } else if (typeof generator.deps === 'string') {
+                    genDepsField.value = generator.deps;
+                } else {
+                    genDepsField.value = '';
+                }
+            }
+            if (genFooterField) genFooterField.checked = !!generator.in_footer;
+            if (genOriginalField) genOriginalField.value = generator.slug || "";
+        }
+
+        function resetGeneratorForm() {
+            if (!generatorForm) return;
+            generatorForm.reset();
+            if (genDepsField) genDepsField.value = "";
+            if (genFooterField) genFooterField.checked = false;
+            if (genOriginalField) genOriginalField.value = "";
+        }
+
+        if (generatorLoadBtn && generatorSelect) {
+            generatorLoadBtn.addEventListener("click", function() {
+                var slug = generatorSelect.value;
+                if (!slug) return;
+                var option = generatorSelect.options[generatorSelect.selectedIndex];
+                var dataAttr = option ? option.getAttribute("data-generator") : null;
+                var parsed = normalizeGeneratorData(dataAttr);
+                if (!parsed) {
+                    parsed = savedGenerators.find(function(gen) { return gen.slug === slug; }) || null;
+                }
+                if (parsed) {
+                    fillGeneratorForm(parsed);
+                }
+            });
+            generatorSelect.addEventListener("change", function() {
+                var slug = generatorSelect.value;
+                if (!slug) {
+                    resetGeneratorForm();
+                    return;
+                }
+                var option = generatorSelect.options[generatorSelect.selectedIndex];
+                var dataAttr = option ? option.getAttribute("data-generator") : null;
+                var parsed = normalizeGeneratorData(dataAttr);
+                if (!parsed) {
+                    parsed = savedGenerators.find(function(gen) { return gen.slug === slug; }) || null;
+                }
+                if (parsed) {
+                    fillGeneratorForm(parsed);
+                }
+            });
+        }
+
+        if (generatorResetBtn) {
+            generatorResetBtn.addEventListener("click", function() {
+                if (generatorSelect) {
+                    generatorSelect.value = "";
+                }
+                resetGeneratorForm();
+            });
+        }
 
         function buildSetPayload() {
             if (!setForm || !payloadInput) {
@@ -1108,6 +1564,8 @@ function pubpi_render_admin_page() {
                             item.custom_path = customInput.value;
                         }
                     }
+                } else if (item.type === "file_generator") {
+                    item.generator_slug = input.getAttribute("data-generator-slug");
                 }
                 items.push(item);
             });
@@ -1167,6 +1625,8 @@ function pubpi_render_admin_page() {
                     selector += "[data-repo=\"" + item.repo + "\"]";
                 } else if (item.type === "manifest_pattern") {
                     selector += "[data-repo=\"" + item.repo + "\"][data-pattern=\"" + item.pattern + "\"]";
+                } else if (item.type === "file_generator") {
+                    selector += "[data-generator-slug=\"" + item.generator_slug + "\"]";
                 }
                 var input = document.querySelector(selector);
                 if (input) {
@@ -1241,6 +1701,45 @@ JS;
         $name = sanitize_text_field($_POST['pubpi_github_name']);
         $type = sanitize_text_field($_POST['pubpi_type']);
         pubpi_install_from_github($repo, $name, $type, '', true); // true = is an update
+    }
+
+    // Generators actions
+    if (isset($_POST['pubpi_save_generator'])) {
+        $gen = [
+            'name' => sanitize_text_field($_POST['pubpi_gen_name'] ?? ''),
+            'slug' => sanitize_title($_POST['pubpi_gen_slug'] ?? ''),
+            'type' => sanitize_text_field($_POST['pubpi_gen_type'] ?? ''),
+            'destination' => sanitize_text_field($_POST['pubpi_gen_destination'] ?? ''),
+            'source_dir' => sanitize_text_field($_POST['pubpi_gen_source'] ?? ''),
+            'target_file' => sanitize_text_field($_POST['pubpi_gen_target'] ?? ''),
+            'handle' => sanitize_text_field($_POST['pubpi_gen_handle'] ?? ''),
+            'deps' => array_filter(array_map('trim', explode(',', sanitize_text_field($_POST['pubpi_gen_deps'] ?? '')))),
+            'in_footer' => !empty($_POST['pubpi_gen_in_footer']) ? true : false,
+        ];
+        $save = pubpi_save_generator_config($gen);
+        if (is_wp_error($save)) {
+            echo '<div class="error notice"><p>❌ ' . esc_html($save->get_error_message()) . '</p></div>';
+        } else {
+            echo '<div class="updated notice"><p>✅ Générateur enregistré.</p></div>';
+        }
+    }
+    if (isset($_POST['pubpi_delete_generator'])) {
+        $slug = sanitize_title($_POST['pubpi_generator_slug'] ?? '');
+        $deleted = pubpi_delete_generator_config($slug);
+        if ($deleted) {
+            echo '<div class="updated notice"><p>🗑️ Générateur supprimé.</p></div>';
+        } else {
+            echo '<div class="error notice"><p>❌ Impossible de supprimer le générateur.</p></div>';
+        }
+    }
+    if (isset($_POST['pubpi_run_generator'])) {
+        $slug = sanitize_title($_POST['pubpi_generator_slug'] ?? '');
+        $result = pubpi_run_generator_by_slug($slug);
+        if (is_wp_error($result)) {
+            echo '<div class="error notice"><p>❌ ' . esc_html($result->get_error_message()) . '</p></div>';
+        } else {
+            echo '<div class="updated notice"><p>✅ Génération effectuée : ' . esc_html($result) . ' lignes ajoutées.</p></div>';
+        }
     }
 
     if (isset($_POST['pubpi_activate'])) {
@@ -2394,6 +2893,12 @@ function pubpi_normalize_set_items($items) {
                     continue 2;
                 }
                 break;
+            case 'file_generator':
+                $entry['generator_slug'] = sanitize_title($item['generator_slug'] ?? '');
+                if ($entry['generator_slug'] === '') {
+                    continue 2;
+                }
+                break;
             default:
                 continue 2;
         }
@@ -2494,6 +2999,7 @@ function pubpi_install_set_items($items) {
         return new WP_Error('pubpi_set_items', 'Liste d\'éléments invalide.');
     }
 
+    $generators = [];
     foreach ($items as $item) {
         if (!is_array($item) || empty($item['type'])) {
             continue;
@@ -2530,7 +3036,17 @@ function pubpi_install_set_items($items) {
                     pubpi_install_manifest_pattern($item['repo'], $item['name'], $branch, $item['manifest_path'], $item['pattern'], $target, $custom_path);
                 }
                 break;
+            case 'file_generator':
+                if (!empty($item['generator_slug'])) {
+                    $generators[] = $item['generator_slug'];
+                }
+                break;
         }
+    }
+
+    // Run generators at the end
+    foreach (array_unique($generators) as $gen_slug) {
+        pubpi_run_generator_by_slug($gen_slug);
     }
 
     return true;
