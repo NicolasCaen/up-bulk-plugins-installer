@@ -10,6 +10,70 @@ if (!defined('ABSPATH')) {
     exit;
 }
 
+function pubpi_register_rest_routes() {
+    register_rest_route(
+        'up-bulk-plugins-installer/v1',
+        '/sets',
+        [
+            'methods' => WP_REST_Server::READABLE,
+            'callback' => 'pubpi_rest_list_sets',
+            'permission_callback' => 'pubpi_rest_can_manage',
+        ]
+    );
+
+    register_rest_route(
+        'up-bulk-plugins-installer/v1',
+        '/sets/(?P<slug>[a-z0-9\-_/]+)/install',
+        [
+            'methods' => WP_REST_Server::CREATABLE,
+            'callback' => 'pubpi_rest_install_set',
+            'permission_callback' => 'pubpi_rest_can_manage',
+            'args' => [
+                'manifest_target' => [
+                    'type' => 'string',
+                    'required' => false,
+                ],
+            ],
+        ]
+    );
+}
+
+function pubpi_rest_can_manage() {
+    return current_user_can('manage_options');
+}
+
+function pubpi_rest_list_sets() {
+    $sets = pubpi_list_saved_sets();
+    return rest_ensure_response($sets);
+}
+
+function pubpi_rest_install_set(WP_REST_Request $request) {
+    $slug = sanitize_title($request->get_param('slug'));
+    if ($slug === '') {
+        return new WP_Error('pubpi_rest_invalid_slug', 'Slug de set invalide.', ['status' => 400]);
+    }
+
+    $manifest_target = $request->get_param('manifest_target');
+
+    $result = pubpi_install_set_by_slug($slug, [
+        'context' => 'rest',
+        'manifest_target' => $manifest_target,
+    ]);
+
+    if (is_wp_error($result)) {
+        $status = 500;
+        $data = $result->get_error_data();
+        if (is_array($data) && isset($data['status'])) {
+            $status = (int) $data['status'];
+        }
+        $response = new WP_Error($result->get_error_code(), $result->get_error_message(), $data);
+        $response->add_data(['status' => $status]);
+        return $response;
+    }
+
+    return rest_ensure_response($result);
+}
+
 function pubpi_render_manifest_docs_page() {
     if (!current_user_can('manage_options')) {
         return;
@@ -119,11 +183,33 @@ JSON;
     echo '<li>Cliquez sur « Installer dans le thème » pour déployer un pattern dans le thème actif.</li>';
     echo '</ol>';
 
+    echo '<h2>5. Utiliser l&#8217;API REST des sets</h2>';
+    echo '<p>L&#8217;API REST permet de lister et d&#8217;installer des sets à distance. Vous devez être authentifié avec un compte ayant la capacité <code>manage_options</code> (nonce WP REST ou authentification basique pour tests locaux).</p>';
+    echo '<h3>Routes disponibles</h3>';
+    echo '<ul>';
+    echo '<li><code>GET /wp-json/up-bulk-plugins-installer/v1/sets</code> : retourne tous les sets enregistrés.</li>';
+    echo '<li><code>POST /wp-json/up-bulk-plugins-installer/v1/sets/&lt;slug&gt;/install</code> : installe le set ciblé. Paramètre optionnel <code>manifest_target</code> pour forcer la destination des patterns (<code>theme</code>, <code>mu-plugins</code> ou <code>plugins</code>).</li>';
+    echo '</ul>';
+    echo '<h3>Exemples de requêtes</h3>';
+    $rest_examples = <<<'HTML'
+<pre style="background:#1e1e1e; color:#f5f5f5; border:1px solid #111; padding:12px; overflow:auto;"><code>curl https://example.com/wp-json/up-bulk-plugins-installer/v1/sets \\ 
+    -H "X-WP-Nonce: &lt;nonce&gt;"
+
+curl https://example.com/wp-json/up-bulk-plugins-installer/v1/sets/hotel/install \\ 
+    -X POST \\ 
+    -H "Content-Type: application/json" \\ 
+    -H "X-WP-Nonce: &lt;nonce&gt;" \\ 
+    -d '{"manifest_target":"theme"}'</code></pre>
+HTML;
+    echo $rest_examples;
+    echo '<p>La réponse d&#8217;installation renvoie le nombre d&#8217;éléments traités, la destination appliquée et, si la requête est effectuée côté REST, les messages générés par l&#8217;installation.</p>';
+
     echo '<p>Pour chaque ajout ou modification du manifest, videz le cache navigateur si nécessaire et vérifiez que les chemins indiqués dans <code>files</code> existent bien dans l&#8217;archive GitHub.</p>';
     echo '</div>';
 }
 
 add_action('admin_menu', 'pubpi_add_admin_page');
+add_action('rest_api_init', 'pubpi_register_rest_routes');
 
 function pubpi_add_admin_page() {
     add_menu_page(
@@ -339,6 +425,7 @@ function pubpi_render_admin_page() {
     $github_theme_categories = pubpi_extract_categories($github_themes);
     $github_feature_categories = pubpi_extract_categories($github_features);
     $manifest_tabs = pubpi_prepare_manifest_tabs($github_manifest_tabs);
+    $saved_sets = pubpi_list_saved_sets();
 
     echo '<div class="wrap"><h1>Installer & Mettre à jour des plugins et thèmes</h1>';
     echo '<h2 class="nav-tab-wrapper pubpi-tabs-nav">';
@@ -350,6 +437,7 @@ function pubpi_render_admin_page() {
         echo '<a href="#' . esc_attr($manifest_tab_id) . '" class="nav-tab">' . esc_html($manifest_tab['label']) . '</a>';
     }
     echo '<a href="#pubpi-tab-features" class="nav-tab">Fonctionnalités</a>';
+    echo '<a href="#pubpi-tab-sets" class="nav-tab">Sets</a>';
     echo '</h2>';
 
     // Tab: WordPress.org
@@ -412,6 +500,152 @@ function pubpi_render_admin_page() {
     }
 
     echo '</tbody></table>';
+    echo '</div>';
+
+    echo '<div id="pubpi-tab-sets" class="pubpi-tab-panel">';
+    echo '<h2>Sets d’éléments</h2>';
+    echo '<p>Enregistrez des sélections d’éléments afin de les réinstaller rapidement sur d’autres sites.</p>';
+    echo '<div class="pubpi-sets-load">';
+    echo '<label for="pubpi-load-set-select">Charger un set existant&nbsp;:</label>';
+    echo '<select id="pubpi-load-set-select" class="pubpi-set-select">';
+    echo '<option value="">— Sélectionner —</option>';
+    foreach ($saved_sets as $set_entry) {
+        echo '<option value="' . esc_attr($set_entry['slug']) . '">' . esc_html($set_entry['name']) . '</option>';
+    }
+    echo '</select>';
+    echo '<button type="button" class="button" id="pubpi-load-set-button">Charger</button>';
+    echo '</div>';
+
+    echo '<form method="post" id="pubpi-set-form" class="pubpi-set-form">';
+    echo '<div class="pubpi-set-fields">';
+    echo '<label for="pubpi-set-slug">Slug du set</label>';
+    echo '<input type="text" id="pubpi-set-slug" name="pubpi_set_slug" class="regular-text" />';
+    echo '<label for="pubpi-set-name">Nom du set</label>';
+    echo '<input type="text" id="pubpi-set-name" name="pubpi_set_name" class="regular-text" />';
+    echo '<label for="pubpi-set-manifest-default">Destination par défaut des patterns manifest</label>';
+    echo '<select id="pubpi-set-manifest-default" name="pubpi_set_manifest_default" class="pubpi-set-select">';
+    echo '<option value="">Défaut (manifest)</option>';
+    echo '<option value="theme">Thème actif</option>';
+    echo '<option value="mu-plugins">MU-Plugins</option>';
+    echo '<option value="plugins">Plugins</option>';
+    echo '</select>';
+    echo '</div>';
+
+    echo '<div class="pubpi-set-sections">';
+
+    echo '<fieldset class="pubpi-set-section">';
+    echo '<legend>Plugins WordPress.org</legend>';
+    foreach ($plugins as $plugin_path => $plugin_data) {
+        if (is_array($plugin_data)) {
+            $plugin_name = $plugin_data['name'];
+        } else {
+            $plugin_name = $plugin_data;
+        }
+        echo '<label class="pubpi-set-option"><input type="checkbox" class="pubpi-set-item" data-type="wp_plugin" data-plugin-path="' . esc_attr($plugin_path) . '" data-plugin-name="' . esc_attr($plugin_name) . '"> ' . esc_html($plugin_name) . '</label>';
+    }
+    echo '</fieldset>';
+
+    echo '<fieldset class="pubpi-set-section">';
+    echo '<legend>Plugins GitHub</legend>';
+    foreach ($github_plugins as $repo => $plugin_data) {
+        $plugin_name = $plugin_data['name'];
+        $main_file = $plugin_data['main_file'] ?? '';
+        echo '<label class="pubpi-set-option"><input type="checkbox" class="pubpi-set-item" data-type="github_plugin" data-repo="' . esc_attr($repo) . '" data-name="' . esc_attr($plugin_name) . '" data-main-file="' . esc_attr($main_file) . '"> ' . esc_html($plugin_name) . ' <code>' . esc_html($repo) . '</code></label>';
+    }
+    echo '</fieldset>';
+
+    echo '<fieldset class="pubpi-set-section">';
+    echo '<legend>Thèmes GitHub</legend>';
+    foreach ($github_themes as $repo => $theme_data) {
+        if (is_array($theme_data)) {
+            $theme_name = $theme_data['name'];
+        } else {
+            $theme_name = $theme_data;
+        }
+        echo '<label class="pubpi-set-option"><input type="checkbox" class="pubpi-set-item" data-type="github_theme" data-repo="' . esc_attr($repo) . '" data-name="' . esc_attr($theme_name) . '"> ' . esc_html($theme_name) . ' <code>' . esc_html($repo) . '</code></label>';
+    }
+    echo '</fieldset>';
+
+    echo '<fieldset class="pubpi-set-section">';
+    echo '<legend>Fonctionnalités</legend>';
+    foreach ($github_features as $repo => $feature_data) {
+        $feature_name = $feature_data['name'];
+        $feature_file = $feature_data['file'] ?? '';
+        $feature_branch = $feature_data['branch'] ?? 'main';
+        $feature_target_id = 'pubpi-feature-target-' . esc_attr(sanitize_title($feature_name));
+        echo '<div class="pubpi-set-feature">';
+        echo '<label class="pubpi-set-option"><input type="checkbox" class="pubpi-set-item" data-type="github_feature" data-repo="' . esc_attr($repo) . '" data-name="' . esc_attr($feature_name) . '" data-file="' . esc_attr($feature_file) . '" data-branch="' . esc_attr($feature_branch) . '" data-target-select="' . esc_attr($feature_target_id) . '"> ' . esc_html($feature_name) . ' <code>' . esc_html($repo) . '</code></label>';
+        echo '<select id="' . esc_attr($feature_target_id) . '" class="pubpi-feature-target-select" data-default="theme">';
+        echo '<option value="theme">Thème</option>';
+        echo '<option value="mu">MU-Plugins</option>';
+        echo '</select>';
+        echo '</div>';
+    }
+    echo '</fieldset>';
+
+    echo '<fieldset class="pubpi-set-section">';
+    echo '<legend>Patterns manifest</legend>';
+    foreach ($manifest_tabs as $manifest_key => $manifest_tab) {
+        $definitions = $manifest_tab['definitions'];
+        foreach ($definitions as $manifest_entry) {
+            if (!empty($manifest_entry['error'])) {
+                continue;
+            }
+            $repo = $manifest_entry['repo'];
+            $source_name = $manifest_entry['name'];
+            $branch = $manifest_entry['branch'];
+            $manifest_path = $manifest_entry['manifest_path'];
+            $patterns = $manifest_entry['patterns'];
+            if (empty($patterns) || !is_array($patterns)) {
+                continue;
+            }
+            foreach ($patterns as $pattern) {
+                $pattern_slug = $pattern['slug'] ?? '';
+                if ($pattern_slug === '') {
+                    continue;
+                }
+                $pattern_name = $pattern['name'] ?? $pattern_slug;
+                $target_id = 'pubpi-pattern-target-' . esc_attr(sanitize_title($pattern_slug . '-' . $repo));
+                $custom_id = 'pubpi-pattern-custom-' . esc_attr(sanitize_title($pattern_slug . '-' . $repo));
+                echo '<div class="pubpi-set-pattern">';
+                echo '<label class="pubpi-set-option"><input type="checkbox" class="pubpi-set-item" data-type="manifest_pattern" data-repo="' . esc_attr($repo) . '" data-name="' . esc_attr($source_name) . '" data-branch="' . esc_attr($branch) . '" data-manifest-path="' . esc_attr($manifest_path) . '" data-pattern="' . esc_attr($pattern_slug) . '" data-target-select="' . esc_attr($target_id) . '" data-custom-input="' . esc_attr($custom_id) . '"> ' . esc_html($pattern_name) . ' <code>' . esc_html($repo) . '</code></label>';
+                echo '<select id="' . esc_attr($target_id) . '" class="pubpi-pattern-target-select" data-default="">';
+                echo '<option value="">Défaut (manifest)</option>';
+                echo '<option value="theme">Thème actif</option>';
+                echo '<option value="mu-plugins">MU-Plugins</option>';
+                echo '<option value="plugins">Plugins</option>';
+                echo '</select>';
+                echo '<input type="text" id="' . esc_attr($custom_id) . '" class="regular-text pubpi-pattern-custom" placeholder="Chemin personnalisé" />';
+                echo '</div>';
+            }
+        }
+    }
+    echo '</fieldset>';
+
+    echo '</div>';
+
+    echo '<input type="hidden" name="pubpi_set_payload" value="" />';
+    submit_button('Enregistrer le set', 'primary', 'pubpi_save_set', false);
+    echo '</form>';
+
+    if (!empty($saved_sets)) {
+        echo '<h3>Sets enregistrés</h3>';
+        echo '<table class="widefat fixed striped pubpi-sets-table"><thead><tr><th>Nom</th><th>Slug</th><th>Éléments</th><th>Action</th></tr></thead><tbody>';
+        foreach ($saved_sets as $set_entry) {
+            $count_items = is_array($set_entry['items']) ? count($set_entry['items']) : 0;
+            echo '<tr>';
+            echo '<td><strong>' . esc_html($set_entry['name']) . '</strong></td>';
+            echo '<td><code>' . esc_html($set_entry['slug']) . '</code></td>';
+            echo '<td>' . esc_html($count_items) . '</td>';
+            echo '<td><form method="post" class="pubpi-set-install-form"><input type="hidden" name="pubpi_set_slug" value="' . esc_attr($set_entry['slug']) . '">';
+            submit_button('Installer', 'secondary small', 'pubpi_install_set', false);
+            echo '</form></td>';
+            echo '</tr>';
+        }
+        echo '</tbody></table>';
+    }
+
+    echo '<script type="application/json" id="pubpi-saved-sets-data">' . wp_json_encode($saved_sets) . '</script>';
     echo '</div>';
 
     // Tab: GitHub Plugins
@@ -736,7 +970,8 @@ function pubpi_render_admin_page() {
 .pubpi-category-filters .button { margin-right: 6px; margin-bottom: 6px; }
 .pubpi-category-filters .button.active { background-color: #2271b1; border-color: #2271b1; color: #ffffff; }
 </style>';
-    echo '<script type="text/javascript">
+    echo '<script type="text/javascript">';
+    echo <<<'JS'
 (function() {
     document.addEventListener("DOMContentLoaded", function() {
         var tabLinks = document.querySelectorAll(".pubpi-tabs-nav .nav-tab");
@@ -782,9 +1017,171 @@ function pubpi_render_admin_page() {
                 });
             });
         });
+
+        var savedSetsData = document.getElementById("pubpi-saved-sets-data");
+        var savedSets = savedSetsData ? JSON.parse(savedSetsData.textContent || "[]") : [];
+        var setForm = document.getElementById("pubpi-set-form");
+        var payloadInput = setForm ? setForm.querySelector("input[name='pubpi_set_payload']") : null;
+        var loadButton = document.getElementById("pubpi-load-set-button");
+        var loadSelect = document.getElementById("pubpi-load-set-select");
+
+        function buildSetPayload() {
+            if (!setForm || !payloadInput) {
+                return;
+            }
+            var slugField = document.getElementById("pubpi-set-slug");
+            var nameField = document.getElementById("pubpi-set-name");
+            var manifestDefaultField = document.getElementById("pubpi-set-manifest-default");
+            var items = [];
+            var selected = setForm.querySelectorAll(".pubpi-set-item:checked");
+            selected.forEach(function(input) {
+                var item = { type: input.getAttribute("data-type") };
+                if (item.type === "wp_plugin") {
+                    item.plugin_path = input.getAttribute("data-plugin-path");
+                    item.plugin_name = input.getAttribute("data-plugin-name");
+                } else if (item.type === "github_plugin") {
+                    item.repo = input.getAttribute("data-repo");
+                    item.name = input.getAttribute("data-name");
+                    item.main_file = input.getAttribute("data-main-file") || "";
+                } else if (item.type === "github_theme") {
+                    item.repo = input.getAttribute("data-repo");
+                    item.name = input.getAttribute("data-name");
+                } else if (item.type === "github_feature") {
+                    item.repo = input.getAttribute("data-repo");
+                    item.name = input.getAttribute("data-name");
+                    item.file = input.getAttribute("data-file");
+                    item.branch = input.getAttribute("data-branch") || "main";
+                    var targetSelectId = input.getAttribute("data-target-select");
+                    if (targetSelectId) {
+                        var targetSelect = document.getElementById(targetSelectId);
+                        if (targetSelect) {
+                            item.target = targetSelect.value;
+                        }
+                    }
+                } else if (item.type === "manifest_pattern") {
+                    item.repo = input.getAttribute("data-repo");
+                    item.name = input.getAttribute("data-name");
+                    item.branch = input.getAttribute("data-branch") || "main";
+                    item.manifest_path = input.getAttribute("data-manifest-path");
+                    item.pattern = input.getAttribute("data-pattern");
+                    var patternTargetId = input.getAttribute("data-target-select");
+                    var patternCustomId = input.getAttribute("data-custom-input");
+                    if (patternTargetId) {
+                        var targetSelect = document.getElementById(patternTargetId);
+                        if (targetSelect) {
+                            item.target = targetSelect.value;
+                        }
+                    }
+                    if (patternCustomId) {
+                        var customInput = document.getElementById(patternCustomId);
+                        if (customInput) {
+                            item.custom_path = customInput.value;
+                        }
+                    }
+                }
+                items.push(item);
+            });
+
+            var payload = {
+                slug: slugField ? slugField.value : "",
+                name: nameField ? nameField.value : "",
+                manifest_default: manifestDefaultField ? manifestDefaultField.value : "",
+                items: items
+            };
+            payloadInput.value = JSON.stringify(payload);
+        }
+
+        if (setForm && payloadInput) {
+            setForm.addEventListener("submit", function() {
+                buildSetPayload();
+            });
+        }
+
+        function populateSetForm(setData) {
+            var slugField = document.getElementById("pubpi-set-slug");
+            var nameField = document.getElementById("pubpi-set-name");
+            var manifestDefaultField = document.getElementById("pubpi-set-manifest-default");
+            if (slugField) {
+                slugField.value = setData.slug || "";
+            }
+            if (nameField) {
+                nameField.value = setData.name || "";
+            }
+            if (manifestDefaultField) {
+                manifestDefaultField.value = (setData.meta && setData.meta.manifest_default) ? setData.meta.manifest_default : "";
+            }
+            setForm.querySelectorAll(".pubpi-set-item").forEach(function(input) {
+                input.checked = false;
+            });
+            setForm.querySelectorAll(".pubpi-feature-target-select, .pubpi-pattern-target-select").forEach(function(select) {
+                select.value = select.getAttribute("data-default") || "";
+            });
+            setForm.querySelectorAll(".pubpi-pattern-custom").forEach(function(input) {
+                input.value = "";
+            });
+            (setData.items || []).forEach(function(item) {
+                var selector = ".pubpi-set-item[data-type=\"" + item.type + "\"]";
+                if (item.type === "wp_plugin") {
+                    selector += "[data-plugin-path=\"" + item.plugin_path + "\"]";
+                } else if (item.type === "github_plugin") {
+                    selector += "[data-repo=\"" + item.repo + "\"]";
+                } else if (item.type === "github_theme") {
+                    selector += "[data-repo=\"" + item.repo + "\"]";
+                } else if (item.type === "github_feature") {
+                    selector += "[data-repo=\"" + item.repo + "\"]";
+                } else if (item.type === "manifest_pattern") {
+                    selector += "[data-repo=\"" + item.repo + "\"][data-pattern=\"" + item.pattern + "\"]";
+                }
+                var input = setForm.querySelector(selector);
+                if (input) {
+                    input.checked = true;
+                    if (item.type === "github_feature") {
+                        var targetSelectId = input.getAttribute("data-target-select");
+                        if (targetSelectId) {
+                            var targetSelect = document.getElementById(targetSelectId);
+                            if (targetSelect && item.target) {
+                                targetSelect.value = item.target;
+                            }
+                        }
+                    }
+                    if (item.type === "manifest_pattern") {
+                        var patternTargetId = input.getAttribute("data-target-select");
+                        if (patternTargetId) {
+                            var targetSelect = document.getElementById(patternTargetId);
+                            if (targetSelect && (item.target || item.target === "")) {
+                                targetSelect.value = item.target;
+                            }
+                        }
+                        var patternCustomId = input.getAttribute("data-custom-input");
+                        if (patternCustomId) {
+                            var customInput = document.getElementById(patternCustomId);
+                            if (customInput && item.custom_path) {
+                                customInput.value = item.custom_path;
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+        if (loadButton && loadSelect) {
+            loadButton.addEventListener("click", function(event) {
+                event.preventDefault();
+                var slug = loadSelect.value;
+                if (!slug) {
+                    return;
+                }
+                var setData = savedSets.find(function(s) { return s.slug === slug; });
+                if (!setData) {
+                    return;
+                }
+                populateSetForm(setData);
+            });
+        }
     });
 })();
-</script>';
+JS;
+    echo '</script>';
     echo '</div>';
 
     // Traitement des actions
@@ -838,6 +1235,48 @@ function pubpi_render_admin_page() {
         $target_location = isset($_POST['pubpi_manifest_target']) ? sanitize_text_field($_POST['pubpi_manifest_target']) : 'theme';
         $custom_path = isset($_POST['pubpi_manifest_custom_path']) ? sanitize_text_field($_POST['pubpi_manifest_custom_path']) : '';
         pubpi_install_manifest_pattern($manifest_repo, $manifest_name, $manifest_branch, $manifest_path, $pattern_slug, $target_location, $custom_path);
+    }
+
+    if (isset($_POST['pubpi_save_set'])) {
+        $payload_raw = isset($_POST['pubpi_set_payload']) ? wp_unslash($_POST['pubpi_set_payload']) : '';
+        $payload = json_decode($payload_raw, true);
+        if (!is_array($payload)) {
+            echo '<div class="error notice"><p>❌ Données de set invalides.</p></div>';
+        } else {
+            $manifest_default = isset($_POST['pubpi_set_manifest_default']) ? sanitize_text_field($_POST['pubpi_set_manifest_default']) : '';
+            if (!isset($payload['meta']) || !is_array($payload['meta'])) {
+                $payload['meta'] = [];
+            }
+            $payload['meta']['manifest_default'] = $manifest_default;
+            $result = pubpi_save_set_data($payload);
+            if (is_wp_error($result)) {
+                echo '<div class="error notice"><p>❌ ' . esc_html($result->get_error_message()) . '</p></div>';
+            } else {
+                echo '<div class="updated notice"><p>✅ Set enregistré.</p></div>';
+            }
+        }
+    }
+
+    if (isset($_POST['pubpi_install_set'])) {
+        $set_slug = sanitize_title($_POST['pubpi_set_slug'] ?? '');
+        if ($set_slug === '') {
+            echo '<div class="error notice"><p>❌ Set introuvable.</p></div>';
+        } else {
+            $install_result = pubpi_install_set_by_slug($set_slug, ['context' => 'admin']);
+            if (is_wp_error($install_result)) {
+                echo '<div class="error notice"><p>❌ ' . esc_html($install_result->get_error_message()) . '</p></div>';
+            } else {
+                $set_info = $install_result['set'];
+                $count = (int) $install_result['items_installed'];
+                $default_target = $install_result['manifest_default'];
+                if ($default_target !== '') {
+                    $target_label = pubpi_install_target_label($default_target, '');
+                } else {
+                    $target_label = 'destinations définies dans chaque manifest';
+                }
+                echo '<div class="updated notice"><p>✅ Set "' . esc_html($set_info['name']) . '" : ' . esc_html($count) . ' élément(s) traités (' . esc_html($target_label) . ').</p></div>';
+            }
+        }
     }
 }
 
@@ -1611,6 +2050,61 @@ function pubpi_copy_directory_with_fallback($source, $destination) {
     return true;
 }
 
+function pubpi_install_set_by_slug($slug, $args = []) {
+    $context = isset($args['context']) ? $args['context'] : 'admin';
+    $override_target = isset($args['manifest_target']) ? $args['manifest_target'] : '';
+
+    $set = pubpi_load_set_data($slug);
+    if (is_wp_error($set)) {
+        return $set;
+    }
+
+    $default_target = $set['meta']['manifest_default'] ?? '';
+    $override_target = pubpi_normalize_set_manifest_target($override_target);
+    if ($override_target !== '') {
+        $default_target = $override_target;
+    }
+
+    $items = pubpi_apply_manifest_default_to_items($set['items'], $default_target);
+    $items_count = count($items);
+
+    $buffered_output = '';
+    if ($context === 'rest') {
+        ob_start();
+    }
+
+    $result = pubpi_install_set_items($items);
+
+    if ($context === 'rest') {
+        $buffered_output = trim((string) ob_get_clean());
+    }
+
+    if (is_wp_error($result)) {
+        if ($context === 'rest' && $buffered_output !== '') {
+            $data = (array) $result->get_error_data();
+            $data['messages'] = $buffered_output;
+            $result->add_data($data);
+        }
+        return $result;
+    }
+
+    if ($context === 'rest') {
+        return [
+            'slug' => $set['slug'],
+            'name' => $set['name'],
+            'items_installed' => $items_count,
+            'manifest_default' => $default_target,
+            'messages' => $buffered_output,
+        ];
+    }
+
+    return [
+        'set' => $set,
+        'items_installed' => $items_count,
+        'manifest_default' => $default_target,
+    ];
+}
+
 function pubpi_install_feature_from_github($repo, $name, $file, $target, $branch = 'main') {
     include_once ABSPATH . 'wp-admin/includes/file.php';
     include_once ABSPATH . 'wp-admin/includes/misc.php';
@@ -1738,4 +2232,270 @@ function pubpi_ensure_theme_feature_include($relative_path) {
 
     $include_line = "\nrequire_once get_stylesheet_directory() . '/" . $relative_path . "';\n";
     return file_put_contents($functions_file, $contents . $include_line) !== false;
+}
+
+function pubpi_get_sets_directory() {
+    return trailingslashit(__DIR__ . '/config/sets');
+}
+
+function pubpi_ensure_sets_directory() {
+    $dir = pubpi_get_sets_directory();
+    if (!is_dir($dir)) {
+        if (!wp_mkdir_p($dir)) {
+            return new WP_Error('pubpi_sets_dir', 'Impossible de créer le dossier des sets.');
+        }
+    }
+    return $dir;
+}
+
+function pubpi_list_saved_sets() {
+    $dir = pubpi_ensure_sets_directory();
+    if (is_wp_error($dir)) {
+        return [];
+    }
+
+    $sets = [];
+    $files = glob(trailingslashit($dir) . '*.json');
+    if (!$files) {
+        return [];
+    }
+
+    foreach ($files as $file) {
+        $contents = file_get_contents($file);
+        if ($contents === false) {
+            continue;
+        }
+        $decoded = json_decode($contents, true);
+        if (!is_array($decoded)) {
+            continue;
+        }
+        $slug = basename($file, '.json');
+        if (empty($decoded['slug'])) {
+            $decoded['slug'] = $slug;
+        }
+        $items = pubpi_normalize_set_items($decoded['items'] ?? []);
+        $meta = is_array($decoded['meta'] ?? null) ? $decoded['meta'] : [];
+        $meta['manifest_default'] = pubpi_normalize_set_manifest_target($meta['manifest_default'] ?? '');
+        $sets[$decoded['slug']] = [
+            'slug' => $decoded['slug'],
+            'name' => $decoded['name'] ?? $decoded['slug'],
+            'file' => basename($file),
+            'items' => $items,
+            'meta' => $meta,
+        ];
+    }
+
+    ksort($sets);
+    return array_values($sets);
+}
+
+function pubpi_normalize_set_manifest_target($target) {
+    $allowed = ['theme', 'mu-plugins', 'plugins'];
+    $target = sanitize_text_field($target);
+    if ($target === '' || in_array($target, $allowed, true)) {
+        return $target;
+    }
+    return '';
+}
+
+function pubpi_normalize_set_items($items) {
+    if (!is_array($items)) {
+        return [];
+    }
+
+    $normalized = [];
+
+    foreach ($items as $item) {
+        if (!is_array($item) || empty($item['type'])) {
+            continue;
+        }
+
+        $type = sanitize_key($item['type']);
+        $entry = ['type' => $type];
+
+        switch ($type) {
+            case 'wp_plugin':
+                $entry['plugin_path'] = sanitize_text_field($item['plugin_path'] ?? '');
+                $entry['plugin_name'] = sanitize_text_field($item['plugin_name'] ?? '');
+                if ($entry['plugin_path'] === '' || $entry['plugin_name'] === '') {
+                    continue 2;
+                }
+                break;
+            case 'github_plugin':
+                $entry['repo'] = sanitize_text_field($item['repo'] ?? '');
+                $entry['name'] = sanitize_text_field($item['name'] ?? '');
+                $entry['main_file'] = sanitize_text_field($item['main_file'] ?? '');
+                if ($entry['repo'] === '' || $entry['name'] === '') {
+                    continue 2;
+                }
+                break;
+            case 'github_theme':
+                $entry['repo'] = sanitize_text_field($item['repo'] ?? '');
+                $entry['name'] = sanitize_text_field($item['name'] ?? '');
+                if ($entry['repo'] === '' || $entry['name'] === '') {
+                    continue 2;
+                }
+                break;
+            case 'github_feature':
+                $entry['repo'] = sanitize_text_field($item['repo'] ?? '');
+                $entry['name'] = sanitize_text_field($item['name'] ?? '');
+                $entry['file'] = sanitize_text_field($item['file'] ?? '');
+                $entry['branch'] = sanitize_text_field($item['branch'] ?? 'main');
+                $entry['target'] = sanitize_text_field($item['target'] ?? '');
+                if ($entry['repo'] === '' || $entry['name'] === '' || $entry['file'] === '') {
+                    continue 2;
+                }
+                break;
+            case 'manifest_pattern':
+                $entry['repo'] = sanitize_text_field($item['repo'] ?? '');
+                $entry['name'] = sanitize_text_field($item['name'] ?? '');
+                $entry['branch'] = sanitize_text_field($item['branch'] ?? 'main');
+                $entry['manifest_path'] = sanitize_text_field($item['manifest_path'] ?? '');
+                $entry['pattern'] = sanitize_text_field($item['pattern'] ?? '');
+                $entry['target'] = sanitize_text_field($item['target'] ?? '');
+                $entry['custom_path'] = sanitize_text_field($item['custom_path'] ?? '');
+                if ($entry['repo'] === '' || $entry['name'] === '' || $entry['manifest_path'] === '' || $entry['pattern'] === '') {
+                    continue 2;
+                }
+                break;
+            default:
+                continue 2;
+        }
+
+        $normalized[] = $entry;
+    }
+
+    return $normalized;
+}
+
+function pubpi_apply_manifest_default_to_items($items, $default_target) {
+    $default_target = pubpi_normalize_set_manifest_target($default_target);
+    if ($default_target === '' || empty($items)) {
+        return $items;
+    }
+
+    foreach ($items as &$item) {
+        if (($item['type'] ?? '') === 'manifest_pattern' && ($item['target'] ?? '') === '') {
+            $item['target'] = $default_target;
+        }
+    }
+    unset($item);
+
+    return $items;
+}
+
+function pubpi_load_set_data($slug) {
+    $dir = pubpi_ensure_sets_directory();
+    if (is_wp_error($dir)) {
+        return $dir;
+    }
+    $path = trailingslashit($dir) . $slug . '.json';
+    if (!file_exists($path)) {
+        return new WP_Error('pubpi_set_missing', 'Set introuvable.');
+    }
+    $contents = file_get_contents($path);
+    if ($contents === false) {
+        return new WP_Error('pubpi_set_read', 'Impossible de lire le set.');
+    }
+    $decoded = json_decode($contents, true);
+    if (!is_array($decoded)) {
+        return new WP_Error('pubpi_set_json', 'Set JSON invalide.');
+    }
+    $decoded['slug'] = $decoded['slug'] ?? $slug;
+    $decoded['items'] = pubpi_normalize_set_items($decoded['items'] ?? []);
+    $decoded['meta'] = is_array($decoded['meta'] ?? null) ? $decoded['meta'] : [];
+    $decoded['meta']['manifest_default'] = pubpi_normalize_set_manifest_target($decoded['meta']['manifest_default'] ?? '');
+    return $decoded;
+}
+
+function pubpi_save_set_data($data) {
+    $dir = pubpi_ensure_sets_directory();
+    if (is_wp_error($dir)) {
+        return $dir;
+    }
+
+    $slug = sanitize_title($data['slug'] ?? '');
+    if ($slug === '') {
+        return new WP_Error('pubpi_set_slug', 'Le slug du set est obligatoire.');
+    }
+
+    $name = sanitize_text_field($data['name'] ?? $slug);
+    $items = pubpi_normalize_set_items($data['items'] ?? []);
+
+    $existing = pubpi_load_set_data($slug);
+    $created_at = (!is_wp_error($existing) && isset($existing['meta']['created_at'])) ? $existing['meta']['created_at'] : current_time('mysql');
+
+    $manifest_default = pubpi_normalize_set_manifest_target(
+        $data['meta']['manifest_default'] ?? $data['manifest_default'] ?? ''
+    );
+
+    $payload = [
+        'slug' => $slug,
+        'name' => $name,
+        'items' => $items,
+        'meta' => [
+            'created_at' => $created_at,
+            'updated_at' => current_time('mysql'),
+            'manifest_default' => $manifest_default,
+        ],
+    ];
+
+    $path = trailingslashit($dir) . $slug . '.json';
+    $json = wp_json_encode($payload, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE);
+    if ($json === false) {
+        return new WP_Error('pubpi_set_encode', 'Impossible d\'encoder le set.');
+    }
+
+    if (file_put_contents($path, $json) === false) {
+        return new WP_Error('pubpi_set_write', 'Impossible d\'écrire le set.');
+    }
+
+    return $payload;
+}
+
+function pubpi_install_set_items($items) {
+    if (!is_array($items)) {
+        return new WP_Error('pubpi_set_items', 'Liste d\'éléments invalide.');
+    }
+
+    foreach ($items as $item) {
+        if (!is_array($item) || empty($item['type'])) {
+            continue;
+        }
+        switch ($item['type']) {
+            case 'wp_plugin':
+                if (!empty($item['plugin_path']) && !empty($item['plugin_name'])) {
+                    pubpi_install_and_activate_plugin($item['plugin_path'], $item['plugin_name']);
+                }
+                break;
+            case 'github_plugin':
+                if (!empty($item['repo']) && !empty($item['name'])) {
+                    $main_file = $item['main_file'] ?? '';
+                    pubpi_install_from_github($item['repo'], $item['name'], 'plugin', $main_file, false);
+                }
+                break;
+            case 'github_theme':
+                if (!empty($item['repo']) && !empty($item['name'])) {
+                    pubpi_install_from_github($item['repo'], $item['name'], 'theme', '', false);
+                }
+                break;
+            case 'github_feature':
+                if (!empty($item['repo']) && !empty($item['name']) && !empty($item['file'])) {
+                    $target = $item['target'] ?? 'theme';
+                    $branch = $item['branch'] ?? 'main';
+                    pubpi_install_feature_from_github($item['repo'], $item['name'], $item['file'], $target, $branch);
+                }
+                break;
+            case 'manifest_pattern':
+                if (!empty($item['repo']) && !empty($item['name']) && !empty($item['manifest_path']) && !empty($item['pattern'])) {
+                    $branch = $item['branch'] ?? 'main';
+                    $target = $item['target'] ?? 'theme';
+                    $custom_path = $item['custom_path'] ?? '';
+                    pubpi_install_manifest_pattern($item['repo'], $item['name'], $branch, $item['manifest_path'], $item['pattern'], $target, $custom_path);
+                }
+                break;
+        }
+    }
+
+    return true;
 }
