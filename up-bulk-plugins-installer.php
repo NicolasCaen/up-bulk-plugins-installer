@@ -208,6 +208,57 @@ HTML;
     echo '</div>';
 }
 
+function pubpi_render_api_docs_page() {
+    if (!current_user_can('manage_options')) {
+        return;
+    }
+
+    echo '<div class="wrap">';
+    echo '<h1>API REST des sets</h1>';
+    echo '<p>Cette page documente les routes REST fournies par le plugin pour consulter et installer les sets enregistrés.</p>';
+
+    echo '<h2>Authentification</h2>';
+    echo '<p>Les requêtes doivent être effectuées avec un compte disposant de la capacité <code>manage_options</code>. Utilisez un nonce WordPress REST (en envoyant l&#8217;en-tête <code>X-WP-Nonce</code>) ou l&#8217;authentification basique sur un environnement de test sécurisé.</p>';
+
+    echo '<h2>Base des routes</h2>';
+    echo '<p>Toutes les routes sont exposées sous le namespace <code>up-bulk-plugins-installer/v1</code>.</p>';
+
+    echo '<h2>Endpoints disponibles</h2>';
+    echo '<ul>';
+    echo '<li><code>GET /wp-json/up-bulk-plugins-installer/v1/sets</code> : retourne la liste complète des sets enregistrés (slug, nom, éléments, métadonnées).</li>';
+    echo '<li><code>POST /wp-json/up-bulk-plugins-installer/v1/sets/&lt;slug&gt;/install</code> : installe le set correspondant au slug fourni. Paramètre optionnel <code>manifest_target</code> pour forcer la destination des patterns (<code>theme</code>, <code>mu-plugins</code> ou <code>plugins</code>).</li>';
+    echo '</ul>';
+
+    echo '<h2>Exemples de requêtes</h2>';
+    $curl_examples = <<<'HTML'
+<pre style="background:#1e1e1e; color:#f5f5f5; border:1px solid #111; padding:12px; overflow:auto;"><code>curl https://example.com/wp-json/up-bulk-plugins-installer/v1/sets \
+    -H "X-WP-Nonce: &lt;nonce&gt;"
+
+curl https://example.com/wp-json/up-bulk-plugins-installer/v1/sets/mu-plugins-cpt/install \
+    -X POST \
+    -H "Content-Type: application/json" \
+    -H "X-WP-Nonce: &lt;nonce&gt;" \
+    -d '{"manifest_target":"mu-plugins"}'</code></pre>
+HTML;
+    echo $curl_examples;
+
+    echo '<h2>Réponses attendues</h2>';
+    echo '<p>Les réponses suivent le format JSON standard de WordPress :</p>';
+    echo '<ul>';
+    echo '<li><strong>GET sets</strong> : tableau d’objets contenant <code>slug</code>, <code>name</code>, <code>items</code> et <code>meta</code>.</li>';
+    echo '<li><strong>POST install</strong> : objet détaillant le nombre d’éléments installés, la destination effective et les messages d’opération.</li>';
+    echo '</ul>';
+
+    echo '<h2>Conseils</h2>';
+    echo '<ul>';
+    echo '<li>Générez un nonce côté WordPress via <code>wp_create_nonce(&#39;wp_rest&#39;)</code> et transmettez-le dans l&#8217;en-tête <code>X-WP-Nonce</code>.</li>';
+    echo '<li>Vérifiez que le slug transmis dans l’URL correspond exactement au fichier de set (ex : <code>mu-plugins-cpt</code> pour <code>mu-plugins-cpt.json</code>).</li>';
+    echo '<li>Utilisez l&#8217;argument <code>manifest_target</code> uniquement si vous souhaitez forcer la destination par défaut configurée dans le set.</li>';
+    echo '</ul>';
+
+    echo '</div>';
+}
+
 add_action('admin_menu', 'pubpi_add_admin_page');
 add_action('rest_api_init', 'pubpi_register_rest_routes');
 
@@ -229,6 +280,15 @@ function pubpi_add_admin_page() {
         'manage_options',
         'bulk-plugin-installer-manifest-docs',
         'pubpi_render_manifest_docs_page'
+    );
+
+    add_submenu_page(
+        'bulk-plugin-installer',
+        'Documentation API REST',
+        'Doc API REST',
+        'manage_options',
+        'bulk-plugin-installer-api-docs',
+        'pubpi_render_api_docs_page'
     );
 }
 
@@ -777,7 +837,7 @@ function pubpi_render_admin_page() {
 
                 echo '<tr data-categories="' . esc_attr($row_categories_attr) . '">';
                 echo '<td class="pubpi-set-cell">';
-                echo '<label class="pubpi-set-option"><input type="checkbox" class="pubpi-set-item" data-type="manifest_pattern" data-repo="' . esc_attr($repo) . '" data-name="' . esc_attr($source_name) . '" data-branch="' . esc_attr($branch) . '" data-manifest-path="' . esc_attr($manifest_path) . '" data-pattern="' . esc_attr($pattern_slug) . '" data-target-select="' . esc_attr($target_id) . '" data-custom-input="' . esc_attr($custom_id) . '"> </label>';
+                echo '<label class="pubpi-set-option"><input type="checkbox" class="pubpi-set-item" data-type="manifest_pattern" data-repo="' . esc_attr($repo) . '" data-name="' . esc_attr($source_name) . '" data-branch="' . esc_attr($branch) . '" data-manifest-path="' . esc_attr($manifest_path) . '" data-pattern="' . esc_attr($pattern_slug) . '" data-target-select="' . esc_attr($target_id) . '" data-custom-input="pubpi_manifest_custom_path_' . esc_attr($pattern_slug) . '"> </label>';
                 echo '</td>';
                 if (!empty($preview_url)) {
                     echo '<td><img src="' . esc_url($preview_url) . '" alt="' . esc_attr($pattern_name) . '" class="pubpi-manifest-preview" /></td>';
