@@ -11,6 +11,391 @@ if (!defined('ABSPATH')) {
 }
 
 // =============================
+// Clean actions storage utilities
+// =============================
+
+function pubpi_get_cleaners_directory() {
+    return trailingslashit(__DIR__ . '/config/clean-actions');
+}
+
+function pubpi_ensure_cleaners_directory() {
+    $dir = pubpi_get_cleaners_directory();
+    if (!is_dir($dir)) {
+        if (!wp_mkdir_p($dir)) {
+            return new WP_Error('pubpi_cleaners_dir', 'Impossible de créer le dossier des actions Clean.');
+        }
+    }
+    return $dir;
+}
+
+function pubpi_list_saved_cleaners() {
+    $dir = pubpi_ensure_cleaners_directory();
+    if (is_wp_error($dir)) {
+        return [];
+    }
+    $out = [];
+    $files = glob(trailingslashit($dir) . '*.json');
+    if ($files) {
+        foreach ($files as $file) {
+            $json = file_get_contents($file);
+            if ($json === false) continue;
+            $cfg = json_decode($json, true);
+            if (!is_array($cfg)) continue;
+            $slug = basename($file, '.json');
+            $cfg['slug'] = $cfg['slug'] ?? $slug;
+            $cfg['name'] = $cfg['name'] ?? $slug;
+            $cfg['updated_at'] = $cfg['updated_at'] ?? '';
+            $out[] = $cfg;
+        }
+    }
+    usort($out, function ($a, $b) {
+        return strcmp($a['slug'], $b['slug']);
+    });
+    return $out;
+}
+
+function pubpi_save_cleaner_config($cleaner) {
+    $dir = pubpi_ensure_cleaners_directory();
+    if (is_wp_error($dir)) return $dir;
+    $slug = sanitize_title($cleaner['slug'] ?? '');
+    if ($slug === '') return new WP_Error('pubpi_clean_slug', 'Slug de l’action requis.');
+
+    $existing = pubpi_load_cleaner_config($slug);
+    $timestamps = [
+        'created_at' => current_time('mysql'),
+        'updated_at' => current_time('mysql'),
+    ];
+    if (is_array($existing) && isset($existing['created_at'])) {
+        $timestamps['created_at'] = $existing['created_at'];
+    }
+
+    $target_dir = sanitize_text_field($cleaner['target_dir'] ?? '');
+    $target_dir = ltrim($target_dir, '/');
+    $target_file = sanitize_text_field($cleaner['target_file'] ?? '');
+    $target_file = ltrim($target_file, '/');
+
+    $extensions = pubpi_clean_normalize_list($cleaner['extensions'] ?? []);
+    $directories = pubpi_clean_normalize_list($cleaner['directories'] ?? []);
+
+    $payload = [
+        'slug' => $slug,
+        'name' => sanitize_text_field($cleaner['name'] ?? $slug),
+        'type' => sanitize_text_field($cleaner['type'] ?? ''),
+        'target_dir' => $target_dir,
+        'target_file' => $target_file,
+        'extensions' => $extensions,
+        'mode' => sanitize_text_field($cleaner['mode'] ?? ''),
+        'pattern' => sanitize_text_field($cleaner['pattern'] ?? ''),
+        'directories' => $directories,
+        'recursive' => !empty($cleaner['recursive']) ? true : false,
+        'delete_originals' => !empty($cleaner['delete_originals']) ? true : false,
+        'created_at' => $timestamps['created_at'],
+        'updated_at' => $timestamps['updated_at'],
+    ];
+
+    if ($payload['type'] === '') {
+        return new WP_Error('pubpi_clean_type', 'Type d’action Clean requis.');
+    }
+
+    $path = trailingslashit($dir) . $slug . '.json';
+    $json = wp_json_encode($payload, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE);
+    if ($json === false) return new WP_Error('pubpi_clean_encode', 'Encodage JSON impossible.');
+    if (!pubpi_write_file_with_fallback($path, $json)) return new WP_Error('pubpi_clean_write', 'Écriture de l’action Clean impossible.');
+    return $payload;
+}
+
+function pubpi_delete_cleaner_config($slug) {
+    $dir = pubpi_ensure_cleaners_directory();
+    if (is_wp_error($dir)) return false;
+    $path = trailingslashit($dir) . sanitize_title($slug) . '.json';
+    if (file_exists($path)) return @unlink($path);
+    return false;
+}
+
+function pubpi_load_cleaner_config($slug) {
+    $dir = pubpi_ensure_cleaners_directory();
+    if (is_wp_error($dir)) return $dir;
+    $path = trailingslashit($dir) . sanitize_title($slug) . '.json';
+    if (!file_exists($path)) return new WP_Error('pubpi_clean_missing', 'Action Clean introuvable.');
+    $json = file_get_contents($path);
+    if ($json === false) return new WP_Error('pubpi_clean_read', 'Lecture action Clean impossible.');
+    $cfg = json_decode($json, true);
+    if (!is_array($cfg)) return new WP_Error('pubpi_clean_json', 'JSON de l’action Clean invalide.');
+    return $cfg;
+}
+
+function pubpi_clean_normalize_path($path, $base = '') {
+    $path = trim((string) $path);
+    if ($path === '') return '';
+    if ($base === '') $base = WP_CONTENT_DIR;
+    if (preg_match('#^[a-zA-Z]:\\#', $path) || strpos($path, '/') === 0) {
+        $abs = $path;
+    } else {
+        $abs = trailingslashit($base) . ltrim($path, '/');
+    }
+    $abs = wp_normalize_path($abs);
+    $check = $abs;
+    if (!file_exists($abs)) {
+        $check = wp_normalize_path(dirname($abs));
+    }
+    $root = wp_normalize_path(WP_CONTENT_DIR);
+    $root_slash = trailingslashit($root);
+    $real = realpath($check);
+    if ($real !== false) {
+        $check = wp_normalize_path($real);
+    }
+    if ($check !== '' && strpos(trailingslashit($check), $root_slash) !== 0) {
+        return new WP_Error('pubpi_clean_path', 'Chemin hors de wp-content : ' . $abs);
+    }
+    return $abs;
+}
+
+function pubpi_clean_normalize_list($value) {
+    if (is_string($value)) {
+        $value = array_map('trim', explode(',', $value));
+    }
+    if (!is_array($value)) {
+        return [];
+    }
+    $out = [];
+    foreach ($value as $entry) {
+        $entry = sanitize_text_field($entry);
+        if ($entry === '') {
+            continue;
+        }
+        $out[$entry] = true;
+    }
+    return array_keys($out);
+}
+
+function pubpi_clean_collect_files($dir, $file, $extensions = [], $recursive = true) {
+    $files = [];
+    if ($file !== '') {
+        if (file_exists($file) && is_file($file)) {
+            $files[] = wp_normalize_path($file);
+        }
+        return $files;
+    }
+    if ($dir === '' || !is_dir($dir)) return $files;
+    if ($recursive) {
+        return pubpi_scan_files_recursive($dir, $extensions);
+    }
+    $handle = opendir($dir);
+    if (!$handle) return $files;
+    while (($entry = readdir($handle)) !== false) {
+        if ($entry === '.' || $entry === '..') continue;
+        $candidate = wp_normalize_path(trailingslashit($dir) . $entry);
+        if (!is_file($candidate)) continue;
+        if (!empty($extensions)) {
+            $ext = strtolower(pathinfo($candidate, PATHINFO_EXTENSION));
+            if (!in_array($ext, $extensions, true)) continue;
+        }
+        $files[] = $candidate;
+    }
+    closedir($handle);
+    sort($files);
+    return $files;
+}
+
+function pubpi_clean_strip_comments($content) {
+    $content = preg_replace('/\/\*.*?\*\//s', '', $content);
+    $content = preg_replace('/^\s*\/\/.*$/m', '', $content);
+    return $content;
+}
+
+function pubpi_clean_js_minify($content) {
+    $content = preg_replace('/\/\*.*?\*\//s', '', $content);
+    $content = preg_replace('/^\s*\/\/.*$/m', '', $content);
+    $content = preg_replace('/\s+/', ' ', $content);
+    return trim($content);
+}
+
+function pubpi_clean_inline_php_includes($file, $delete_originals, &$report) {
+    $content = file_get_contents($file);
+    if ($content === false) {
+        $report['errors'][] = 'Lecture impossible: ' . $file;
+        return;
+    }
+    $pattern = '/^\s*(require_once|require|include_once|include)\s*\(\s*[\'\"]([^\'\"]+)[\'\"]\s*\)\s*;.*$/m';
+    $callback = function ($matches) use ($file, $delete_originals, &$report) {
+        $includePath = $matches[2];
+        $base = wp_normalize_path(dirname($file));
+        $normalized = pubpi_clean_normalize_path($includePath, $base);
+        if (is_wp_error($normalized) || !file_exists($normalized)) {
+            $report['warnings'][] = 'Fichier introuvable pour ' . $includePath . ' dans ' . $file;
+            return $matches[0];
+        }
+        $includedContent = file_get_contents($normalized);
+        if ($includedContent === false) {
+            $report['errors'][] = 'Lecture include impossible: ' . $normalized;
+            return $matches[0];
+        }
+        if ($delete_originals) {
+            @unlink($normalized);
+            $report['deleted'][] = $normalized;
+        }
+        return "\n" . $includedContent . "\n";
+    };
+    $replaced = preg_replace_callback($pattern, $callback, $content);
+    if ($replaced !== null && $replaced !== $content) {
+        if (!pubpi_write_file_with_fallback($file, $replaced)) {
+            $report['errors'][] = 'Écriture impossible: ' . $file;
+            return;
+        }
+        $report['modified'][] = $file;
+    }
+}
+
+function pubpi_clean_inline_scss_imports($file, $delete_originals, &$report) {
+    $content = file_get_contents($file);
+    if ($content === false) {
+        $report['errors'][] = 'Lecture impossible: ' . $file;
+        return;
+    }
+    $pattern = '/^\s*@import\s+[\'\"]([^\'\"]+)[\'\"]\s*;.*$/m';
+    $callback = function ($matches) use ($file, $delete_originals, &$report) {
+        $importPath = $matches[1];
+        $base = wp_normalize_path(dirname($file));
+        $normalized = pubpi_clean_normalize_path($importPath, $base);
+        if (is_wp_error($normalized) || !file_exists($normalized)) {
+            $report['warnings'][] = 'Fichier introuvable pour ' . $importPath . ' dans ' . $file;
+            return $matches[0];
+        }
+        $includedContent = file_get_contents($normalized);
+        if ($includedContent === false) {
+            $report['errors'][] = 'Lecture import impossible: ' . $normalized;
+            return $matches[0];
+        }
+        if ($delete_originals) {
+            @unlink($normalized);
+            $report['deleted'][] = $normalized;
+        }
+        return "\n" . $includedContent . "\n";
+    };
+    $replaced = preg_replace_callback($pattern, $callback, $content);
+    if ($replaced !== null && $replaced !== $content) {
+        if (!pubpi_write_file_with_fallback($file, $replaced)) {
+            $report['errors'][] = 'Écriture impossible: ' . $file;
+            return;
+        }
+        $report['modified'][] = $file;
+    }
+}
+
+function pubpi_clean_remove_directories($base, $directories, &$report) {
+    foreach ($directories as $rel) {
+        $path = pubpi_clean_normalize_path($rel, $base);
+        if (is_wp_error($path)) {
+            $report['errors'][] = $path->get_error_message();
+            continue;
+        }
+        if (!file_exists($path) || !is_dir($path)) {
+            continue;
+        }
+        pubpi_rrmdir($path, $report);
+        $report['deleted'][] = $path;
+    }
+}
+
+function pubpi_rrmdir($dir, &$report = null) {
+    if (!is_dir($dir)) return;
+    $items = new RecursiveIteratorIterator(
+        new RecursiveDirectoryIterator($dir, FilesystemIterator::SKIP_DOTS),
+        RecursiveIteratorIterator::CHILD_FIRST
+    );
+    foreach ($items as $item) {
+        if ($item->isDir()) {
+            @rmdir($item->getPathname());
+        } else {
+            @unlink($item->getPathname());
+        }
+    }
+    @rmdir($dir);
+}
+
+function pubpi_run_cleaner_by_slug($slug) {
+    $cfg = pubpi_load_cleaner_config($slug);
+    if (is_wp_error($cfg)) return $cfg;
+
+    $report = [
+        'modified' => [],
+        'deleted' => [],
+        'errors' => [],
+        'warnings' => [],
+    ];
+
+    $type = $cfg['type'];
+    $targetDir = pubpi_clean_normalize_path($cfg['target_dir'] ?? '');
+    if (is_wp_error($targetDir)) return $targetDir;
+    $targetFile = pubpi_clean_normalize_path($cfg['target_file'] ?? '', $targetDir !== '' ? $targetDir : WP_CONTENT_DIR);
+    if (is_wp_error($targetFile)) return $targetFile;
+
+    switch ($type) {
+        case 'remove_comments':
+            $files = pubpi_clean_collect_files($targetDir, $targetFile, $cfg['extensions'] ?? [], !empty($cfg['recursive']));
+            pubpi_clean_strip_comments_from_files($files, $report);
+            break;
+        case 'inline_php':
+            $files = pubpi_clean_collect_files($targetDir, $targetFile, ['php'], false);
+            foreach ($files as $file) {
+                pubpi_clean_inline_php_includes($file, !empty($cfg['delete_originals']), $report);
+            }
+            break;
+        case 'inline_scss':
+            $files = pubpi_clean_collect_files($targetDir, $targetFile, ['scss'], false);
+            foreach ($files as $file) {
+                pubpi_clean_inline_scss_imports($file, !empty($cfg['delete_originals']), $report);
+            }
+            break;
+        case 'minify_js':
+            $files = pubpi_clean_collect_files($targetDir, $targetFile, ['js'], !empty($cfg['recursive']));
+            foreach ($files as $file) {
+                $original = file_get_contents($file);
+                if ($original === false) {
+                    $report['errors'][] = 'Lecture impossible: ' . $file;
+                    continue;
+                }
+                $minified = pubpi_clean_js_minify($original);
+                if ($minified !== $original) {
+                    if (!pubpi_write_file_with_fallback($file, $minified)) {
+                        $report['errors'][] = 'Écriture impossible: ' . $file;
+                        continue;
+                    }
+                    $report['modified'][] = $file;
+                }
+            }
+            break;
+        case 'purge_directories':
+            $directories = $cfg['directories'] ?? [];
+            $base = ($targetDir !== '') ? $targetDir : WP_CONTENT_DIR;
+            pubpi_clean_remove_directories($base, $directories, $report);
+            break;
+        default:
+            return new WP_Error('pubpi_clean_type', 'Type d’action Clean non supporté.');
+    }
+
+    return $report;
+}
+
+function pubpi_clean_strip_comments_from_files($files, &$report) {
+    foreach ($files as $file) {
+        $original = file_get_contents($file);
+        if ($original === false) {
+            $report['errors'][] = 'Lecture impossible: ' . $file;
+            continue;
+        }
+        $stripped = pubpi_clean_strip_comments($original);
+        if ($stripped !== $original) {
+            if (!pubpi_write_file_with_fallback($file, $stripped)) {
+                $report['errors'][] = 'Écriture impossible: ' . $file;
+                continue;
+            }
+            $report['modified'][] = $file;
+        }
+    }
+}
+
+// =============================
 // Generators storage utilities
 // =============================
 
@@ -175,6 +560,28 @@ function pubpi_run_generator_by_slug($slug) {
     }
     if (!file_exists($target_file)) {
         if (!pubpi_write_file_with_fallback($target_file, "")) return new WP_Error('pubpi_gen_touch', 'Impossible de créer le fichier cible.');
+    }
+
+    $target_ext = strtolower(pathinfo($target_file, PATHINFO_EXTENSION));
+    if ($target_ext === 'php') {
+        $current = file_get_contents($target_file);
+        if ($current === false) {
+            return new WP_Error('pubpi_gen_target_read', 'Impossible de lire le fichier PHP cible.');
+        }
+        $trimmed = ltrim($current);
+        if (strpos($trimmed, "<?php") !== 0) {
+            $body = ltrim($current, "\r\n\t ");
+            $prefixed = "<?php\n\n" . $body;
+            if (!pubpi_write_file_with_fallback($target_file, $prefixed)) {
+                return new WP_Error('pubpi_gen_php_prefix', 'Impossible de préparer le fichier PHP cible.');
+            }
+        } elseif (strpos($current, "<?php") !== 0) {
+            // Nettoyer les espaces avant l'ouverture PHP
+            $normalized = preg_replace('/^\s+/', '', $current);
+            if (!pubpi_write_file_with_fallback($target_file, $normalized)) {
+                return new WP_Error('pubpi_gen_php_prefix', 'Impossible de normaliser le fichier PHP cible.');
+            }
+        }
     }
 
     $exts = [];
@@ -770,6 +1177,7 @@ function pubpi_render_admin_page() {
     echo '<a href="#pubpi-tab-features" class="nav-tab">Fonctionnalités</a>';
     echo '<a href="#pubpi-tab-generators" class="nav-tab">Générateurs</a>';
     echo '<a href="#pubpi-tab-sets" class="nav-tab">Sets</a>';
+    echo '<a href="#pubpi-tab-clean" class="nav-tab">Clean</a>';
     echo '</h2>';
 
     // Tab: WordPress.org
@@ -895,6 +1303,85 @@ function pubpi_render_admin_page() {
     echo '</div>';
     echo '<script type="application/json" id="pubpi-saved-sets-data">' . wp_json_encode($saved_sets) . '</script>';
     echo '</div>';
+
+    // Tab: Clean actions
+    $saved_cleaners = pubpi_list_saved_cleaners();
+    echo '<div id="pubpi-tab-clean" class="pubpi-tab-panel">';
+    echo '<h2>Actions Clean</h2>';
+    echo '<p>Automatisez les opérations de nettoyage et d’optimisation sur vos fichiers.</p>';
+    echo '<table class="widefat fixed striped"><thead><tr><th class="pubpi-set-col">Add set</th><th>Nom</th><th>Type</th><th>Cible</th><th>Dernière mise à jour</th><th>Actions</th></tr></thead><tbody>';
+    if (!empty($saved_cleaners)) {
+        foreach ($saved_cleaners as $cleaner) {
+            $type = $cleaner['type'] ?? '';
+            $targetDir = $cleaner['target_dir'] ?? '';
+            $targetFile = $cleaner['target_file'] ?? '';
+            $updated = $cleaner['updated_at'] ?? '';
+            $cible = $targetFile !== '' ? $targetFile : $targetDir;
+            echo '<tr>';
+            echo '<td class="pubpi-set-cell"><label class="pubpi-set-option"><input type="checkbox" class="pubpi-set-item" data-type="clean_action" data-clean-slug="' . esc_attr($cleaner['slug']) . '"> </label></td>';
+            echo '<td><strong>' . esc_html($cleaner['name']) . '</strong><br><code>' . esc_html($cleaner['slug']) . '</code></td>';
+            echo '<td>' . esc_html($type) . '</td>';
+            echo '<td><code>' . esc_html($cible) . '</code></td>';
+            echo '<td>' . esc_html($updated) . '</td>';
+            echo '<td>';
+            echo '<form method="post" style="display:inline-block; margin-right:6px;"><input type="hidden" name="pubpi_cleaner_slug" value="' . esc_attr($cleaner['slug']) . '">';
+            submit_button('Exécuter', 'secondary small', 'pubpi_run_cleaner', false);
+            echo '</form>';
+            echo '<form method="post" style="display:inline-block;"><input type="hidden" name="pubpi_cleaner_slug" value="' . esc_attr($cleaner['slug']) . '">';
+            submit_button('Supprimer', 'link-delete', 'pubpi_delete_cleaner', false);
+            echo '</form>';
+            echo '</td>';
+            echo '</tr>';
+        }
+    } else {
+        echo '<tr><td colspan="6">Aucune action Clean enregistrée.</td></tr>';
+    }
+    echo '</tbody></table>';
+
+    echo '<div class="pubpi-clean-load">';
+    echo '<label for="pubpi-load-cleaner-select">Charger une action existante&nbsp;:</label>';
+    echo '<select id="pubpi-load-cleaner-select" class="pubpi-set-select">';
+    echo '<option value="">— Sélectionner —</option>';
+    foreach ($saved_cleaners as $cleaner) {
+        $option_data = wp_json_encode($cleaner, JSON_UNESCAPED_UNICODE);
+        echo '<option value="' . esc_attr($cleaner['slug']) . '" data-cleaner="' . esc_attr($option_data) . '">' . esc_html($cleaner['name'] ?? $cleaner['slug']) . '</option>';
+    }
+    echo '</select>';
+    echo '<button type="button" class="button" id="pubpi-load-cleaner-button">Charger</button>';
+    echo '<button type="button" class="button" id="pubpi-reset-cleaner-button">Réinitialiser</button>';
+    echo '</div>';
+
+    echo '<h3>Créer ou modifier une action</h3>';
+    echo '<form method="post" class="pubpi-set-form" id="pubpi-cleaner-form">';
+    echo '<div class="pubpi-set-fields">';
+    echo '<label for="pubpi-clean-name">Nom</label>';
+    echo '<input type="text" id="pubpi-clean-name" name="pubpi_clean_name" class="regular-text" />';
+    echo '<label for="pubpi-clean-slug">Slug</label>';
+    echo '<input type="text" id="pubpi-clean-slug" name="pubpi_clean_slug" class="regular-text" />';
+    echo '<label for="pubpi-clean-type">Type</label>';
+    echo '<select id="pubpi-clean-type" name="pubpi_clean_type" class="pubpi-set-select">';
+    echo '<option value="remove_comments">Supprimer commentaires</option>';
+    echo '<option value="inline_php">Inline includes PHP</option>';
+    echo '<option value="inline_scss">Inline imports SCSS</option>';
+    echo '<option value="minify_js">Minifier JS</option>';
+    echo '<option value="purge_directories">Purger dossiers</option>';
+    echo '</select>';
+    echo '<label for="pubpi-clean-target-dir">Dossier cible (relatif wp-content)</label>';
+    echo '<input type="text" id="pubpi-clean-target-dir" name="pubpi_clean_target_dir" class="regular-text" placeholder="ex: mu-plugins/nicolas" />';
+    echo '<label for="pubpi-clean-target-file">Fichier cible (relatif au dossier)</label>';
+    echo '<input type="text" id="pubpi-clean-target-file" name="pubpi_clean_target_file" class="regular-text" placeholder="ex: root.scss ou includes.php" />';
+    echo '<label for="pubpi-clean-extensions">Extensions (CSV)</label>';
+    echo '<input type="text" id="pubpi-clean-extensions" name="pubpi_clean_extensions" class="regular-text" placeholder="ex: php,js,scss" />';
+    echo '<label><input type="checkbox" id="pubpi-clean-recursive" name="pubpi_clean_recursive" value="1" /> Parcours récursif</label>';
+    echo '<label><input type="checkbox" id="pubpi-clean-delete-originals" name="pubpi_clean_delete_originals" value="1" /> Supprimer les fichiers originaux (inline)</label>';
+    echo '<label for="pubpi-clean-directories">Dossiers à supprimer (CSV)</label>';
+    echo '<input type="text" id="pubpi-clean-directories" name="pubpi_clean_directories" class="regular-text" placeholder="ex: node_modules,.git" />';
+    echo '</div>';
+    echo '<input type="hidden" id="pubpi-clean-original" name="pubpi_clean_original_slug" value="" />';
+    submit_button('Enregistrer l’action', 'primary', 'pubpi_save_cleaner', false);
+    echo '</form>';
+    echo '</div>';
+    echo '<script type="application/json" id="pubpi-saved-cleaners-data">' . wp_json_encode($saved_cleaners) . '</script>';
 
     // Tab: Generators
     $saved_generators = pubpi_list_saved_generators();
@@ -1329,6 +1816,8 @@ function pubpi_render_admin_page() {
 .pubpi-set-fields label { font-weight: 600; }
 .pubpi-set-note { margin: 0; }
 .pubpi-set-form-title { margin: 0; font-size: 1.2em; }
+.pubpi-clean-load { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin: 16px 0; }
+.pubpi-clean-load label { font-weight: 600; }
 </style>';
     echo '<script type="text/javascript">';
     echo <<<'JS'
@@ -1417,6 +1906,22 @@ function pubpi_render_admin_page() {
         var generatorLoadBtn = document.getElementById("pubpi-load-generator-button");
         var generatorResetBtn = document.getElementById("pubpi-reset-generator-button");
         var generatorForm = document.getElementById("pubpi-generator-form");
+        var savedCleanersData = document.getElementById("pubpi-saved-cleaners-data");
+        var savedCleaners = savedCleanersData ? JSON.parse(savedCleanersData.textContent || "[]") : [];
+        var cleanerSelect = document.getElementById("pubpi-load-cleaner-select");
+        var cleanerLoadBtn = document.getElementById("pubpi-load-cleaner-button");
+        var cleanerResetBtn = document.getElementById("pubpi-reset-cleaner-button");
+        var cleanerForm = document.getElementById("pubpi-cleaner-form");
+        var cleanNameField = document.getElementById("pubpi-clean-name");
+        var cleanSlugField = document.getElementById("pubpi-clean-slug");
+        var cleanTypeField = document.getElementById("pubpi-clean-type");
+        var cleanTargetDirField = document.getElementById("pubpi-clean-target-dir");
+        var cleanTargetFileField = document.getElementById("pubpi-clean-target-file");
+        var cleanExtensionsField = document.getElementById("pubpi-clean-extensions");
+        var cleanRecursiveField = document.getElementById("pubpi-clean-recursive");
+        var cleanDeleteField = document.getElementById("pubpi-clean-delete-originals");
+        var cleanDirectoriesField = document.getElementById("pubpi-clean-directories");
+        var cleanOriginalField = document.getElementById("pubpi-clean-original");
         var genNameField = document.getElementById("pubpi-gen-name");
         var genSlugField = document.getElementById("pubpi-gen-slug");
         var genTypeField = document.getElementById("pubpi-gen-type");
@@ -1470,6 +1975,30 @@ function pubpi_render_admin_page() {
             if (genOriginalField) genOriginalField.value = "";
         }
 
+        function fillCleanerForm(cleaner) {
+            if (!cleanerForm || !cleaner) return;
+            if (cleanNameField) cleanNameField.value = cleaner.name || cleaner.slug || "";
+            if (cleanSlugField) cleanSlugField.value = cleaner.slug || "";
+            if (cleanTypeField) cleanTypeField.value = cleaner.type || "remove_comments";
+            if (cleanTargetDirField) cleanTargetDirField.value = cleaner.target_dir || "";
+            if (cleanTargetFileField) cleanTargetFileField.value = cleaner.target_file || "";
+            if (cleanExtensionsField) cleanExtensionsField.value = (cleaner.extensions || []).join(',');
+            if (cleanRecursiveField) cleanRecursiveField.checked = !!cleaner.recursive;
+            if (cleanDeleteField) cleanDeleteField.checked = !!cleaner.delete_originals;
+            if (cleanDirectoriesField) cleanDirectoriesField.value = (cleaner.directories || []).join(',');
+            if (cleanOriginalField) cleanOriginalField.value = cleaner.slug || "";
+        }
+
+        function resetCleanerForm() {
+            if (!cleanerForm) return;
+            cleanerForm.reset();
+            if (cleanExtensionsField) cleanExtensionsField.value = "";
+            if (cleanDirectoriesField) cleanDirectoriesField.value = "";
+            if (cleanRecursiveField) cleanRecursiveField.checked = false;
+            if (cleanDeleteField) cleanDeleteField.checked = false;
+            if (cleanOriginalField) cleanOriginalField.value = "";
+        }
+
         if (generatorLoadBtn && generatorSelect) {
             generatorLoadBtn.addEventListener("click", function() {
                 var slug = generatorSelect.value;
@@ -1508,6 +2037,47 @@ function pubpi_render_admin_page() {
                     generatorSelect.value = "";
                 }
                 resetGeneratorForm();
+            });
+        }
+
+        if (cleanerLoadBtn && cleanerSelect) {
+            cleanerLoadBtn.addEventListener("click", function() {
+                var slug = cleanerSelect.value;
+                if (!slug) return;
+                var option = cleanerSelect.options[cleanerSelect.selectedIndex];
+                var dataAttr = option ? option.getAttribute("data-cleaner") : null;
+                var parsed = normalizeGeneratorData(dataAttr);
+                if (!parsed) {
+                    parsed = savedCleaners.find(function(c) { return c.slug === slug; }) || null;
+                }
+                if (parsed) {
+                    fillCleanerForm(parsed);
+                }
+            });
+            cleanerSelect.addEventListener("change", function() {
+                var slug = cleanerSelect.value;
+                if (!slug) {
+                    resetCleanerForm();
+                    return;
+                }
+                var option = cleanerSelect.options[cleanerSelect.selectedIndex];
+                var dataAttr = option ? option.getAttribute("data-cleaner") : null;
+                var parsed = normalizeGeneratorData(dataAttr);
+                if (!parsed) {
+                    parsed = savedCleaners.find(function(c) { return c.slug === slug; }) || null;
+                }
+                if (parsed) {
+                    fillCleanerForm(parsed);
+                }
+            });
+        }
+
+        if (cleanerResetBtn) {
+            cleanerResetBtn.addEventListener("click", function() {
+                if (cleanerSelect) {
+                    cleanerSelect.value = "";
+                }
+                resetCleanerForm();
             });
         }
 
@@ -1566,6 +2136,8 @@ function pubpi_render_admin_page() {
                     }
                 } else if (item.type === "file_generator") {
                     item.generator_slug = input.getAttribute("data-generator-slug");
+                } else if (item.type === "clean_action") {
+                    item.clean_slug = input.getAttribute("data-clean-slug");
                 }
                 items.push(item);
             });
@@ -1627,6 +2199,8 @@ function pubpi_render_admin_page() {
                     selector += "[data-repo=\"" + item.repo + "\"][data-pattern=\"" + item.pattern + "\"]";
                 } else if (item.type === "file_generator") {
                     selector += "[data-generator-slug=\"" + item.generator_slug + "\"]";
+                } else if (item.type === "clean_action") {
+                    selector += "[data-clean-slug=\"" + item.clean_slug + "\"]";
                 }
                 var input = document.querySelector(selector);
                 if (input) {
@@ -1739,6 +2313,49 @@ JS;
             echo '<div class="error notice"><p>❌ ' . esc_html($result->get_error_message()) . '</p></div>';
         } else {
             echo '<div class="updated notice"><p>✅ Génération effectuée : ' . esc_html($result) . ' lignes ajoutées.</p></div>';
+        }
+    }
+
+    // Clean actions
+    if (isset($_POST['pubpi_save_cleaner'])) {
+        $clean = [
+            'name' => sanitize_text_field($_POST['pubpi_clean_name'] ?? ''),
+            'slug' => sanitize_title($_POST['pubpi_clean_slug'] ?? ''),
+            'type' => sanitize_text_field($_POST['pubpi_clean_type'] ?? ''),
+            'target_dir' => sanitize_text_field($_POST['pubpi_clean_target_dir'] ?? ''),
+            'target_file' => sanitize_text_field($_POST['pubpi_clean_target_file'] ?? ''),
+            'extensions' => sanitize_text_field($_POST['pubpi_clean_extensions'] ?? ''),
+            'directories' => sanitize_text_field($_POST['pubpi_clean_directories'] ?? ''),
+            'recursive' => !empty($_POST['pubpi_clean_recursive']),
+            'delete_originals' => !empty($_POST['pubpi_clean_delete_originals']),
+        ];
+        $save = pubpi_save_cleaner_config($clean);
+        if (is_wp_error($save)) {
+            echo '<div class="error notice"><p>❌ ' . esc_html($save->get_error_message()) . '</p></div>';
+        } else {
+            echo '<div class="updated notice"><p>✅ Action Clean enregistrée.</p></div>';
+        }
+    }
+    if (isset($_POST['pubpi_delete_cleaner'])) {
+        $slug = sanitize_title($_POST['pubpi_cleaner_slug'] ?? '');
+        $deleted = pubpi_delete_cleaner_config($slug);
+        if ($deleted) {
+            echo '<div class="updated notice"><p>🗑️ Action Clean supprimée.</p></div>';
+        } else {
+            echo '<div class="error notice"><p>❌ Impossible de supprimer l’action Clean.</p></div>';
+        }
+    }
+    if (isset($_POST['pubpi_run_cleaner'])) {
+        $slug = sanitize_title($_POST['pubpi_cleaner_slug'] ?? '');
+        $result = pubpi_run_cleaner_by_slug($slug);
+        if (is_wp_error($result)) {
+            echo '<div class="error notice"><p>❌ ' . esc_html($result->get_error_message()) . '</p></div>';
+        } else {
+            $modified = count($result['modified']);
+            $deleted = count($result['deleted']);
+            $errors = count($result['errors']);
+            $warnings = count($result['warnings']);
+            echo '<div class="updated notice"><p>✅ Action Clean exécutée. Modifiés : ' . esc_html($modified) . ', supprimés : ' . esc_html($deleted) . ', avertissements : ' . esc_html($warnings) . ', erreurs : ' . esc_html($errors) . '.</p></div>';
         }
     }
 
@@ -2899,6 +3516,12 @@ function pubpi_normalize_set_items($items) {
                     continue 2;
                 }
                 break;
+            case 'clean_action':
+                $entry['clean_slug'] = sanitize_title($item['clean_slug'] ?? '');
+                if ($entry['clean_slug'] === '') {
+                    continue 2;
+                }
+                break;
             default:
                 continue 2;
         }
@@ -3041,12 +3664,25 @@ function pubpi_install_set_items($items) {
                     $generators[] = $item['generator_slug'];
                 }
                 break;
+            case 'clean_action':
+                if (!empty($item['clean_slug'])) {
+                    $cleaners[] = $item['clean_slug'];
+                }
+                break;
         }
     }
 
     // Run generators at the end
     foreach (array_unique($generators) as $gen_slug) {
         pubpi_run_generator_by_slug($gen_slug);
+    }
+
+    // Run cleaners after generators
+    foreach (array_unique($cleaners ?? []) as $clean_slug) {
+        $result = pubpi_run_cleaner_by_slug($clean_slug);
+        if (is_wp_error($result)) {
+            return $result;
+        }
     }
 
     return true;
