@@ -2,7 +2,7 @@
 /*
 Plugin Name: Up Bulk Plugin Installer
 Description: Installe, active et met à jour automatiquement une sélection de plugins et thèmes essentiels depuis WordPress.org ou GitHub.
-Version: 1.4
+Version: 1.5
 Author: GEHIN Nicolas
 */
 
