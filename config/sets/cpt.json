@@ -1,0 +1,51 @@
+{
+    "slug": "cpt",
+    "name": "cpt",
+    "items": [
+        {
+            "type": "manifest_pattern",
+            "repo": "NicolasCaen\/up-module-cpt",
+            "name": "Up module cpt",
+            "branch": "Master",
+            "manifest_path": "manifest.json",
+            "pattern": "cpt-events",
+            "target": "",
+            "custom_path": ""
+        },
+        {
+            "type": "manifest_pattern",
+            "repo": "NicolasCaen\/up-module-cpt",
+            "name": "Up module cpt",
+            "branch": "Master",
+            "manifest_path": "manifest.json",
+            "pattern": "cpt-land",
+            "target": "",
+            "custom_path": ""
+        },
+        {
+            "type": "manifest_pattern",
+            "repo": "NicolasCaen\/up-module-cpt",
+            "name": "Up module cpt",
+            "branch": "Master",
+            "manifest_path": "manifest.json",
+            "pattern": "cpt-news",
+            "target": "",
+            "custom_path": ""
+        },
+        {
+            "type": "manifest_pattern",
+            "repo": "NicolasCaen\/up-module-cpt",
+            "name": "Up module cpt",
+            "branch": "Master",
+            "manifest_path": "manifest.json",
+            "pattern": "cpt-offers",
+            "target": "",
+            "custom_path": ""
+        }
+    ],
+    "meta": {
+        "created_at": "2025-10-21 10:32:21",
+        "updated_at": "2025-10-21 10:47:23",
+        "manifest_default": ""
+    }
+}

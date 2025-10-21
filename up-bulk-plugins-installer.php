@@ -450,7 +450,7 @@ function pubpi_render_admin_page() {
         }
         echo '</div>';
     }
-    echo '<table id="pubpi-wp-plugins" class="widefat fixed striped"><thead><tr><th>Nom du plugin</th><th>Description</th><th>Catégories</th><th>Action</th></tr></thead><tbody>';
+    echo '<table id="pubpi-wp-plugins" class="widefat fixed striped"><thead><tr><th class="pubpi-set-col">Add set</th><th>Nom du plugin</th><th>Description</th><th>Catégories</th><th>Action</th></tr></thead><tbody>';
 
     foreach ($plugins as $plugin_path => $plugin_data) {
         if (is_array($plugin_data)) {
@@ -467,6 +467,7 @@ function pubpi_render_admin_page() {
         $is_active = is_plugin_active($plugin_path);
 
         echo '<tr data-categories="' . esc_attr($row_categories_attr) . '">';
+        echo '<td class="pubpi-set-cell"><label class="pubpi-set-option"><input type="checkbox" class="pubpi-set-item" data-type="wp_plugin" data-plugin-path="' . esc_attr($plugin_path) . '" data-plugin-name="' . esc_attr($plugin_name) . '"> </label></td>';
         echo '<td><strong>' . esc_html($plugin_name) . '</strong></td>';
         if (!empty($plugin_description)) {
             echo '<td>' . esc_html($plugin_description) . '</td>';
@@ -531,98 +532,7 @@ function pubpi_render_admin_page() {
     echo '</select>';
     echo '</div>';
 
-    echo '<div class="pubpi-set-sections">';
-
-    echo '<fieldset class="pubpi-set-section">';
-    echo '<legend>Plugins WordPress.org</legend>';
-    foreach ($plugins as $plugin_path => $plugin_data) {
-        if (is_array($plugin_data)) {
-            $plugin_name = $plugin_data['name'];
-        } else {
-            $plugin_name = $plugin_data;
-        }
-        echo '<label class="pubpi-set-option"><input type="checkbox" class="pubpi-set-item" data-type="wp_plugin" data-plugin-path="' . esc_attr($plugin_path) . '" data-plugin-name="' . esc_attr($plugin_name) . '"> ' . esc_html($plugin_name) . '</label>';
-    }
-    echo '</fieldset>';
-
-    echo '<fieldset class="pubpi-set-section">';
-    echo '<legend>Plugins GitHub</legend>';
-    foreach ($github_plugins as $repo => $plugin_data) {
-        $plugin_name = $plugin_data['name'];
-        $main_file = $plugin_data['main_file'] ?? '';
-        echo '<label class="pubpi-set-option"><input type="checkbox" class="pubpi-set-item" data-type="github_plugin" data-repo="' . esc_attr($repo) . '" data-name="' . esc_attr($plugin_name) . '" data-main-file="' . esc_attr($main_file) . '"> ' . esc_html($plugin_name) . ' <code>' . esc_html($repo) . '</code></label>';
-    }
-    echo '</fieldset>';
-
-    echo '<fieldset class="pubpi-set-section">';
-    echo '<legend>Thèmes GitHub</legend>';
-    foreach ($github_themes as $repo => $theme_data) {
-        if (is_array($theme_data)) {
-            $theme_name = $theme_data['name'];
-        } else {
-            $theme_name = $theme_data;
-        }
-        echo '<label class="pubpi-set-option"><input type="checkbox" class="pubpi-set-item" data-type="github_theme" data-repo="' . esc_attr($repo) . '" data-name="' . esc_attr($theme_name) . '"> ' . esc_html($theme_name) . ' <code>' . esc_html($repo) . '</code></label>';
-    }
-    echo '</fieldset>';
-
-    echo '<fieldset class="pubpi-set-section">';
-    echo '<legend>Fonctionnalités</legend>';
-    foreach ($github_features as $repo => $feature_data) {
-        $feature_name = $feature_data['name'];
-        $feature_file = $feature_data['file'] ?? '';
-        $feature_branch = $feature_data['branch'] ?? 'main';
-        $feature_target_id = 'pubpi-feature-target-' . esc_attr(sanitize_title($feature_name));
-        echo '<div class="pubpi-set-feature">';
-        echo '<label class="pubpi-set-option"><input type="checkbox" class="pubpi-set-item" data-type="github_feature" data-repo="' . esc_attr($repo) . '" data-name="' . esc_attr($feature_name) . '" data-file="' . esc_attr($feature_file) . '" data-branch="' . esc_attr($feature_branch) . '" data-target-select="' . esc_attr($feature_target_id) . '"> ' . esc_html($feature_name) . ' <code>' . esc_html($repo) . '</code></label>';
-        echo '<select id="' . esc_attr($feature_target_id) . '" class="pubpi-feature-target-select" data-default="theme">';
-        echo '<option value="theme">Thème</option>';
-        echo '<option value="mu">MU-Plugins</option>';
-        echo '</select>';
-        echo '</div>';
-    }
-    echo '</fieldset>';
-
-    echo '<fieldset class="pubpi-set-section">';
-    echo '<legend>Patterns manifest</legend>';
-    foreach ($manifest_tabs as $manifest_key => $manifest_tab) {
-        $definitions = $manifest_tab['definitions'];
-        foreach ($definitions as $manifest_entry) {
-            if (!empty($manifest_entry['error'])) {
-                continue;
-            }
-            $repo = $manifest_entry['repo'];
-            $source_name = $manifest_entry['name'];
-            $branch = $manifest_entry['branch'];
-            $manifest_path = $manifest_entry['manifest_path'];
-            $patterns = $manifest_entry['patterns'];
-            if (empty($patterns) || !is_array($patterns)) {
-                continue;
-            }
-            foreach ($patterns as $pattern) {
-                $pattern_slug = $pattern['slug'] ?? '';
-                if ($pattern_slug === '') {
-                    continue;
-                }
-                $pattern_name = $pattern['name'] ?? $pattern_slug;
-                $target_id = 'pubpi-pattern-target-' . esc_attr(sanitize_title($pattern_slug . '-' . $repo));
-                $custom_id = 'pubpi-pattern-custom-' . esc_attr(sanitize_title($pattern_slug . '-' . $repo));
-                echo '<div class="pubpi-set-pattern">';
-                echo '<label class="pubpi-set-option"><input type="checkbox" class="pubpi-set-item" data-type="manifest_pattern" data-repo="' . esc_attr($repo) . '" data-name="' . esc_attr($source_name) . '" data-branch="' . esc_attr($branch) . '" data-manifest-path="' . esc_attr($manifest_path) . '" data-pattern="' . esc_attr($pattern_slug) . '" data-target-select="' . esc_attr($target_id) . '" data-custom-input="' . esc_attr($custom_id) . '"> ' . esc_html($pattern_name) . ' <code>' . esc_html($repo) . '</code></label>';
-                echo '<select id="' . esc_attr($target_id) . '" class="pubpi-pattern-target-select" data-default="">';
-                echo '<option value="">Défaut (manifest)</option>';
-                echo '<option value="theme">Thème actif</option>';
-                echo '<option value="mu-plugins">MU-Plugins</option>';
-                echo '<option value="plugins">Plugins</option>';
-                echo '</select>';
-                echo '<input type="text" id="' . esc_attr($custom_id) . '" class="regular-text pubpi-pattern-custom" placeholder="Chemin personnalisé" />';
-                echo '</div>';
-            }
-        }
-    }
-    echo '</fieldset>';
-
-    echo '</div>';
+    echo '<p class="description">Sélectionnez les éléments directement dans les onglets correspondants grâce aux cases à cocher et vidétes lignes pour ce set.</p>';
 
     echo '<input type="hidden" name="pubpi_set_payload" value="" />';
     submit_button('Enregistrer le set', 'primary', 'pubpi_save_set', false);
@@ -658,7 +568,7 @@ function pubpi_render_admin_page() {
         }
         echo '</div>';
     }
-    echo '<table id="pubpi-github-plugins" class="widefat fixed striped"><thead><tr><th>Nom du plugin</th><th>Description</th><th>Catégories</th><th>Repository</th><th>Action</th></tr></thead><tbody>';
+    echo '<table id="pubpi-github-plugins" class="widefat fixed striped"><thead><tr><th class="pubpi-set-col">Add set</th><th>Nom du plugin</th><th>Description</th><th>Catégories</th><th>Repository</th><th>Actions</th></tr></thead><tbody>';
 
     // Section Plugins GitHub
 
@@ -680,6 +590,7 @@ function pubpi_render_admin_page() {
         $is_active = $is_installed && !empty($main_file) && is_plugin_active($plugin_path);
 
         echo '<tr data-categories="' . esc_attr($row_categories_attr) . '">';
+        echo '<td class="pubpi-set-cell"><label class="pubpi-set-option"><input type="checkbox" class="pubpi-set-item" data-type="github_plugin" data-repo="' . esc_attr($repo) . '" data-name="' . esc_attr($plugin_name) . '" data-main-file="' . esc_attr($main_file) . '"> </label></td>';
         echo '<td><strong>' . esc_html($plugin_name) . '</strong></td>';
         if (!empty($plugin_description)) {
             echo '<td>' . esc_html($plugin_description) . '</td>';
@@ -746,7 +657,7 @@ function pubpi_render_admin_page() {
         }
         echo '</div>';
     }
-    echo '<table id="pubpi-github-themes" class="widefat fixed striped"><thead><tr><th>Nom du thème</th><th>Catégories</th><th>Repository</th><th>Action</th></tr></thead><tbody>';
+    echo '<table id="pubpi-github-themes" class="widefat fixed striped"><thead><tr><th class="pubpi-set-col">Add set</th><th>Nom du thème</th><th>Catégories</th><th>Repository</th><th>Action</th></tr></thead><tbody>';
 
     foreach ($github_themes as $repo => $theme_data) {
         if (is_array($theme_data)) {
@@ -763,7 +674,7 @@ function pubpi_render_admin_page() {
         $category_slugs = array_map('pubpi_category_slug', $theme_categories);
         $row_categories_attr = empty($category_slugs) ? '' : implode(' ', $category_slugs);
 
-        echo '<tr data-categories="' . esc_attr($row_categories_attr) . '">';
+        echo '<td class="pubpi-set-cell"><label class="pubpi-set-option"><input type="checkbox" class="pubpi-set-item" data-type="github_theme" data-repo="' . esc_attr($repo) . '" data-name="' . esc_attr($theme_name) . '"> </label></td>';
         echo '<td><strong>' . esc_html($theme_name) . '</strong></td>';
         if (!empty($theme_categories)) {
             echo '<td>' . esc_html(implode(', ', $theme_categories)) . '</td>';
@@ -834,7 +745,7 @@ function pubpi_render_admin_page() {
             }
             echo '</div>';
         }
-        echo '<table id="' . esc_attr($table_id) . '" class="widefat fixed striped"><thead><tr><th>Preview</th><th>Nom</th><th>Description</th><th>Catégories</th><th>Repository</th><th>Actions</th></tr></thead><tbody>';
+        echo '<table id="' . esc_attr($table_id) . '" class="widefat fixed striped"><thead><tr><th class="pubpi-set-col">Add set</th><th>Preview</th><th>Nom</th><th>Description</th><th>Catégories</th><th>Repository</th><th>Actions</th></tr></thead><tbody>';
 
         $has_manifest_pattern = false;
         foreach ($definitions as $manifest_entry) {
@@ -859,8 +770,13 @@ function pubpi_render_admin_page() {
                 $pattern_category_slugs = array_map('pubpi_category_slug', $pattern_categories);
                 $row_categories_attr = empty($pattern_category_slugs) ? '' : implode(' ', $pattern_category_slugs);
                 $preview_url = !empty($pattern['preview']) ? pubpi_build_manifest_asset_url($repo, $branch, $pattern['preview']) : '';
+                $target_id = 'pubpi-pattern-target-' . sanitize_title($manifest_key . '-' . $pattern_slug);
+                $custom_id = 'pubpi-pattern-custom-' . sanitize_title($manifest_key . '-' . $pattern_slug);
 
                 echo '<tr data-categories="' . esc_attr($row_categories_attr) . '">';
+                echo '<td class="pubpi-set-cell">';
+                echo '<label class="pubpi-set-option"><input type="checkbox" class="pubpi-set-item" data-type="manifest_pattern" data-repo="' . esc_attr($repo) . '" data-name="' . esc_attr($source_name) . '" data-branch="' . esc_attr($branch) . '" data-manifest-path="' . esc_attr($manifest_path) . '" data-pattern="' . esc_attr($pattern_slug) . '" data-target-select="' . esc_attr($target_id) . '" data-custom-input="' . esc_attr($custom_id) . '"> </label>';
+                echo '</td>';
                 if (!empty($preview_url)) {
                     echo '<td><img src="' . esc_url($preview_url) . '" alt="' . esc_attr($pattern_name) . '" class="pubpi-manifest-preview" /></td>';
                 } else {
@@ -877,6 +793,16 @@ function pubpi_render_admin_page() {
                 echo '<td>' . (!empty($pattern_categories) ? esc_html(implode(', ', $pattern_categories)) : '&mdash;') . '</td>';
                 echo '<td><code>' . esc_html($repo) . '</code></td>';
                 echo '<td>';
+                echo '<div class="pubpi-set-controls">';
+                echo '<select id="' . esc_attr($target_id) . '" class="pubpi-pattern-target-select" data-default="">';
+                echo '<option value="">Défaut (manifest)</option>';
+                echo '<option value="theme">Thème actif</option>';
+                echo '<option value="mu-plugins">MU-Plugins</option>';
+                echo '<option value="plugins">Plugins</option>';
+                echo '</select>';
+                echo '<input type="text" id="' . esc_attr($custom_id) . '" class="regular-text pubpi-pattern-custom" placeholder="Chemin personnalisé" />';
+                echo '</div>';
+                echo '<div class="pubpi-actions-wrapper">';
                 echo '<form method="post" class="pubpi-manifest-install-form" style="display:inline;">';
                 echo '<input type="hidden" name="pubpi_manifest_repo" value="' . esc_attr($repo) . '" />';
                 echo '<input type="hidden" name="pubpi_manifest_name" value="' . esc_attr($source_name) . '" />';
@@ -901,6 +827,7 @@ function pubpi_render_admin_page() {
                 echo '</details>';
                 submit_button('Installer', 'secondary small', 'pubpi_install_manifest_pattern', false);
                 echo '</form>';
+                echo '</div>';
                 echo '</td></tr>';
             }
         }
@@ -923,7 +850,7 @@ function pubpi_render_admin_page() {
         }
         echo '</div>';
     }
-    echo '<table id="pubpi-github-features" class="widefat fixed striped"><thead><tr><th>Nom</th><th>Description</th><th>Catégories</th><th>Repository</th><th>Actions</th></tr></thead><tbody>';
+    echo '<table id="pubpi-github-features" class="widefat fixed striped"><thead><tr><th class="pubpi-set-col">Add set</th><th>Nom</th><th>Description</th><th>Catégories</th><th>Repository</th><th>Actions</th></tr></thead><tbody>';
     foreach ($github_features as $repo => $feature_data) {
         $feature_name = $feature_data['name'];
         $feature_description = $feature_data['description'] ?? '';
@@ -933,13 +860,24 @@ function pubpi_render_admin_page() {
         $slug = basename($repo);
         $category_slugs = array_map('pubpi_category_slug', $feature_categories);
         $row_categories_attr = empty($category_slugs) ? '' : implode(' ', $category_slugs);
+        $feature_target_id = 'pubpi-feature-target-' . sanitize_title($feature_name . '-' . $repo);
 
         echo '<tr data-categories="' . esc_attr($row_categories_attr) . '">';
+        echo '<td class="pubpi-set-cell">';
+        echo '<label class="pubpi-set-option"><input type="checkbox" class="pubpi-set-item" data-type="github_feature" data-repo="' . esc_attr($repo) . '" data-name="' . esc_attr($feature_name) . '" data-file="' . esc_attr($feature_file) . '" data-branch="' . esc_attr($feature_branch) . '" data-target-select="' . esc_attr($feature_target_id) . '"> </label>';
+        echo '</td>';
         echo '<td><strong>' . esc_html($feature_name) . '</strong></td>';
         echo '<td>' . (!empty($feature_description) ? esc_html($feature_description) : '&mdash;') . '</td>';
         echo '<td>' . (!empty($feature_categories) ? esc_html(implode(', ', $feature_categories)) : '&mdash;') . '</td>';
         echo '<td><code>' . esc_html($repo) . '</code></td>';
         echo '<td>';
+        echo '<div class="pubpi-set-controls">';
+        echo '<select id="' . esc_attr($feature_target_id) . '" class="pubpi-feature-target-select" data-default="theme">';
+        echo '<option value="theme">Thème</option>';
+        echo '<option value="mu">MU-Plugins</option>';
+        echo '</select>';
+        echo '</div>';
+        echo '<div class="pubpi-actions-wrapper">';
         echo '<form method="post" style="display:inline;">';
         echo '<input type="hidden" name="pubpi_feature_repo" value="' . esc_attr($repo) . '" />';
         echo '<input type="hidden" name="pubpi_feature_name" value="' . esc_attr($feature_name) . '" />';
@@ -951,12 +889,6 @@ function pubpi_render_admin_page() {
         echo '<form method="post" style="display:inline; margin-left:8px;">';
         echo '<input type="hidden" name="pubpi_feature_repo" value="' . esc_attr($repo) . '" />';
         echo '<input type="hidden" name="pubpi_feature_name" value="' . esc_attr($feature_name) . '" />';
-        echo '<input type="hidden" name="pubpi_feature_file" value="' . esc_attr($feature_file) . '" />';
-        echo '<input type="hidden" name="pubpi_feature_branch" value="' . esc_attr($feature_branch) . '" />';
-        echo '<input type="hidden" name="pubpi_feature_target" value="mu" />';
-        submit_button('Installer dans MU-Plugins', 'secondary small', 'pubpi_install_feature', false);
-        echo '</form>';
-        echo '</td></tr>';
     }
     echo '</tbody></table>';
     echo '</div>';
@@ -969,6 +901,10 @@ function pubpi_render_admin_page() {
 .pubpi-category-filters { margin: 12px 0 8px; }
 .pubpi-category-filters .button { margin-right: 6px; margin-bottom: 6px; }
 .pubpi-category-filters .button.active { background-color: #2271b1; border-color: #2271b1; color: #ffffff; }
+.pubpi-set-col { width: 30px; text-align: center; }
+.pubpi-set-cell { width: 30px; text-align: center; white-space: nowrap; }
+.pubpi-set-cell .pubpi-set-option { display: flex; flex-direction: column; align-items: center; gap: 2px; font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: #2271b1; }
+.pubpi-set-cell .pubpi-set-option input { margin: 0; }
 </style>';
     echo '<script type="text/javascript">';
     echo <<<'JS'
@@ -1033,7 +969,7 @@ function pubpi_render_admin_page() {
             var nameField = document.getElementById("pubpi-set-name");
             var manifestDefaultField = document.getElementById("pubpi-set-manifest-default");
             var items = [];
-            var selected = setForm.querySelectorAll(".pubpi-set-item:checked");
+            var selected = document.querySelectorAll(".pubpi-set-item:checked");
             selected.forEach(function(input) {
                 var item = { type: input.getAttribute("data-type") };
                 if (item.type === "wp_plugin") {
@@ -1110,13 +1046,18 @@ function pubpi_render_admin_page() {
             if (manifestDefaultField) {
                 manifestDefaultField.value = (setData.meta && setData.meta.manifest_default) ? setData.meta.manifest_default : "";
             }
-            setForm.querySelectorAll(".pubpi-set-item").forEach(function(input) {
+            document.querySelectorAll(".pubpi-set-item").forEach(function(input) {
                 input.checked = false;
             });
-            setForm.querySelectorAll(".pubpi-feature-target-select, .pubpi-pattern-target-select").forEach(function(select) {
-                select.value = select.getAttribute("data-default") || "";
+            document.querySelectorAll(".pubpi-feature-target-select, .pubpi-pattern-target-select").forEach(function(select) {
+                var def = select.getAttribute("data-default");
+                if (typeof def === "string") {
+                    select.value = def;
+                } else {
+                    select.value = "";
+                }
             });
-            setForm.querySelectorAll(".pubpi-pattern-custom").forEach(function(input) {
+            document.querySelectorAll(".pubpi-pattern-custom").forEach(function(input) {
                 input.value = "";
             });
             (setData.items || []).forEach(function(item) {
@@ -1132,7 +1073,7 @@ function pubpi_render_admin_page() {
                 } else if (item.type === "manifest_pattern") {
                     selector += "[data-repo=\"" + item.repo + "\"][data-pattern=\"" + item.pattern + "\"]";
                 }
-                var input = setForm.querySelector(selector);
+                var input = document.querySelector(selector);
                 if (input) {
                     input.checked = true;
                     if (item.type === "github_feature") {
