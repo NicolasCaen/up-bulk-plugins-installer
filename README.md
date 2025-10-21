@@ -12,6 +12,8 @@ Installe, active et met à jour automatiquement une sélection de plugins, thèm
   - [Thèmes GitHub](#thèmes-github)
   - [Fonctionnalités GitHub](#fonctionnalités-github)
   - [Patterns via manifest.json](#patterns-via-manifestjson)
+  - [Gestion des sets](#gestion-des-sets)
+- [API REST](#api-rest)
 - [Mises à jour depuis GitHub](#mises-à-jour-depuis-github)
 - [Détection automatique du fichier principal](#détection-automatique-du-fichier-principal)
 - [Gestion des versions locales](#gestion-des-versions-locales)
@@ -26,6 +28,9 @@ Installe, active et met à jour automatiquement une sélection de plugins, thèm
 - Indication de l’état actuel: installé/actif, installé/inactif, non installé.
 - Comparaison de version locale vs dernière release GitHub et bouton de mise à jour.
 - Activation rapide d’un plugin installé ou d’un thème installé.
+- Création de sets multi-sources (plugins WP.org, dépôts GitHub, thèmes, fonctionnalités, patterns) directement depuis leurs tableaux respectifs.
+- Enregistrement, chargement et édition de sets au format JSON avec ciblage optionnel des destinations (`theme`, `mu-plugins`, `plugins`) et chemins personnalisés.
+- Page de documentation intégrée pour l’API REST et fichier `API.md` décrivant les endpoints disponibles.
 - Installation de fonctionnalités PHP GitHub directement dans `functions.php` (avec include automatique) ou dans `mu-plugins/`.
 - Support d’onglets multiples basés sur des `manifest.json` pour déployer des patterns front-end (fichiers JSON, CSS, JS, PHP, etc.) dans le thème actif.
 
@@ -93,6 +98,19 @@ add_filter('pubpi_manifest_tabs', function (array $tabs) {
 });
 ```
 
+### Gestion des sets
+- La colonne « Add set » présente dans chaque tableau permet de composer un set multi-sources via des cases à cocher.
+- Les éléments sélectionnés peuvent recevoir une destination (`theme`, `mu-plugins`, `plugins`) et, pour les patterns, un chemin personnalisé lorsque l’on crée un set.
+- Le formulaire « Sets » autorise l’enregistrement, la mise à jour et le chargement d’un set existant (stocké dans `config/sets/*.json`).
+- Les sets sont sauvegardés avec leur slug, leur nom, l’ensemble des éléments choisis ainsi que la destination par défaut utilisée lors des installations REST.
+
+## API REST
+- Deux endpoints sont exposés sous `up-bulk-plugins-installer/v1` :
+  - `GET /sets` retourne l’ensemble des sets disponibles (slug, nom, items, méta).
+  - `POST /sets/<slug>/install` déclenche l’installation du set ciblé, avec prise en charge optionnelle de `manifest_target` pour forcer la destination.
+- L’accès requiert un compte possédant la capacité `manage_options` (nonce `X-WP-Nonce` ou authentification basique en local).
+- Une page dédiée dans l’administration (`Doc API REST`) résume ces informations, complétée par le fichier `API.md` à la racine du plugin.
+
 ## Mises à jour depuis GitHub
 - Le plugin interroge `https://api.github.com/repos/{user}/{repo}/releases/latest`.
 - Si une release existe: téléchargement via `zipball_url` de la release la plus récente.
@@ -130,4 +148,4 @@ Pour les plugins GitHub, si le fichier principal n’est pas spécifié, le plug
 ---
 
 Auteur: GEHIN Nicolas
-Version du plugin: 1.3
+Version du plugin: 1.4
