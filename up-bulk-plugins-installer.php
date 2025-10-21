@@ -772,6 +772,8 @@ function pubpi_render_admin_page() {
                 $preview_url = !empty($pattern['preview']) ? pubpi_build_manifest_asset_url($repo, $branch, $pattern['preview']) : '';
                 $target_id = 'pubpi-pattern-target-' . sanitize_title($manifest_key . '-' . $pattern_slug);
                 $custom_id = 'pubpi-pattern-custom-' . sanitize_title($manifest_key . '-' . $pattern_slug);
+                $custom_wrap_id = 'pubpi-pattern-custom-wrap-' . sanitize_title($manifest_key . '-' . $pattern_slug);
+                $advanced_wrap_id = 'pubpi-manifest-advanced-' . sanitize_title($manifest_key . '-' . $pattern_slug);
 
                 echo '<tr data-categories="' . esc_attr($row_categories_attr) . '">';
                 echo '<td class="pubpi-set-cell">';
@@ -793,15 +795,6 @@ function pubpi_render_admin_page() {
                 echo '<td>' . (!empty($pattern_categories) ? esc_html(implode(', ', $pattern_categories)) : '&mdash;') . '</td>';
                 echo '<td><code>' . esc_html($repo) . '</code></td>';
                 echo '<td>';
-                echo '<div class="pubpi-set-controls">';
-                echo '<select id="' . esc_attr($target_id) . '" class="pubpi-pattern-target-select" data-default="">';
-                echo '<option value="">Défaut (manifest)</option>';
-                echo '<option value="theme">Thème actif</option>';
-                echo '<option value="mu-plugins">MU-Plugins</option>';
-                echo '<option value="plugins">Plugins</option>';
-                echo '</select>';
-                echo '<input type="text" id="' . esc_attr($custom_id) . '" class="regular-text pubpi-pattern-custom" placeholder="Chemin personnalisé" />';
-                echo '</div>';
                 echo '<div class="pubpi-actions-wrapper">';
                 echo '<form method="post" class="pubpi-manifest-install-form" style="display:inline;">';
                 echo '<input type="hidden" name="pubpi_manifest_repo" value="' . esc_attr($repo) . '" />';
@@ -810,21 +803,20 @@ function pubpi_render_admin_page() {
                 echo '<input type="hidden" name="pubpi_manifest_path" value="' . esc_attr($manifest_path) . '" />';
                 echo '<input type="hidden" name="pubpi_manifest_pattern" value="' . esc_attr($pattern_slug) . '" />';
                 echo '<input type="hidden" name="pubpi_manifest_table" value="' . esc_attr($manifest_key) . '" />';
-                echo '<details class="pubpi-manifest-override" style="display:inline-block;margin-left:6px;">';
-                echo '<summary>Options avancées</summary>';
-                echo '<div class="pubpi-manifest-override-content">';
-                echo '<p class="description">Par défaut, le pattern est installé aux emplacements prévus par le manifest. Utilisez les options ci-dessous pour forcer une destination globale.</p>';
-                echo '<label for="pubpi_manifest_target_' . esc_attr($pattern_slug) . '">Destination globale</label>';
-                echo '<select id="pubpi_manifest_target_' . esc_attr($pattern_slug) . '" name="pubpi_manifest_target" class="pubpi-manifest-target-select">';
+                echo '<div class="pubpi-actions-target">';
+                echo '<label for="' . esc_attr($target_id) . '">Destination globale</label>';
+                echo '<select id="' . esc_attr($target_id) . '" name="pubpi_manifest_target" class="pubpi-pattern-target-select pubpi-manifest-target-select" data-default="" data-custom-wrap="#' . esc_attr($custom_wrap_id) . '" data-advanced="#' . esc_attr($advanced_wrap_id) . '">';
                 echo '<option value="">Défaut (manifest)</option>';
                 echo '<option value="theme">Thème actif</option>';
                 echo '<option value="mu-plugins">MU-Plugins</option>';
                 echo '<option value="plugins">Plugins</option>';
                 echo '</select>';
-                echo '<label for="pubpi_manifest_custom_path_' . esc_attr($pattern_slug) . '">Chemin personnalisé</label>';
-                echo '<input type="text" id="pubpi_manifest_custom_path_' . esc_attr($pattern_slug) . '" name="pubpi_manifest_custom_path" class="pubpi-manifest-custom-path" placeholder="/ressources/mon-plugin" />';
                 echo '</div>';
-                echo '</details>';
+                echo '<div id="' . esc_attr($advanced_wrap_id) . '" class="pubpi-manifest-advanced" style="display:none;">';
+                echo '<div id="' . esc_attr($custom_wrap_id) . '" class="pubpi-set-custom-field" style="display:none;">';
+                echo '<input type="text" id="pubpi_manifest_custom_path_' . esc_attr($pattern_slug) . '" name="pubpi_manifest_custom_path" class="regular-text pubpi-pattern-custom pubpi-manifest-custom-path" placeholder="Chemin personnalisé" />';
+                echo '</div>';
+                echo '</div>';
                 submit_button('Installer', 'secondary small', 'pubpi_install_manifest_pattern', false);
                 echo '</form>';
                 echo '</div>';
@@ -872,7 +864,7 @@ function pubpi_render_admin_page() {
         echo '<td><code>' . esc_html($repo) . '</code></td>';
         echo '<td>';
         echo '<div class="pubpi-set-controls">';
-        echo '<select id="' . esc_attr($feature_target_id) . '" class="pubpi-feature-target-select" data-default="theme">';
+        echo '<select id="' . esc_attr($feature_target_id) . '" class="pubpi-feature-target-select" data-default="theme" data-custom-wrap="">';
         echo '<option value="theme">Thème</option>';
         echo '<option value="mu">MU-Plugins</option>';
         echo '</select>';
@@ -951,6 +943,33 @@ function pubpi_render_admin_page() {
                     var rowCats = (row.getAttribute("data-categories") || "").split(" ").filter(Boolean);
                     row.style.display = (category === "__all" || rowCats.includes(category)) ? "" : "none";
                 });
+            });
+        });
+
+        function toggleCustomField(select) {
+            if (!select) {
+                return;
+            }
+            var wrapSelector = select.getAttribute("data-custom-wrap");
+            if (wrapSelector) {
+                var wrap = document.querySelector(wrapSelector);
+                if (wrap) {
+                    wrap.style.display = select.value === "" ? "none" : "block";
+                }
+            }
+            var advSelector = select.getAttribute("data-advanced");
+            if (advSelector) {
+                var adv = document.querySelector(advSelector);
+                if (adv) {
+                    adv.style.display = select.value === "" ? "none" : "block";
+                }
+            }
+        }
+
+        document.querySelectorAll(".pubpi-pattern-target-select, .pubpi-feature-target-select, .pubpi-manifest-target-select").forEach(function(select) {
+            toggleCustomField(select);
+            select.addEventListener("change", function() {
+                toggleCustomField(select);
             });
         });
 
@@ -1049,13 +1068,14 @@ function pubpi_render_admin_page() {
             document.querySelectorAll(".pubpi-set-item").forEach(function(input) {
                 input.checked = false;
             });
-            document.querySelectorAll(".pubpi-feature-target-select, .pubpi-pattern-target-select").forEach(function(select) {
+            document.querySelectorAll(".pubpi-feature-target-select, .pubpi-pattern-target-select, .pubpi-manifest-target-select").forEach(function(select) {
                 var def = select.getAttribute("data-default");
                 if (typeof def === "string") {
                     select.value = def;
                 } else {
                     select.value = "";
                 }
+                toggleCustomField(select);
             });
             document.querySelectorAll(".pubpi-pattern-custom").forEach(function(input) {
                 input.value = "";
