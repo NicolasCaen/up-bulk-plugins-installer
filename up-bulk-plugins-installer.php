@@ -972,177 +972,19 @@ function pubpi_add_admin_page() {
 
 function pubpi_render_admin_page() {
     // Plugins WordPress.org
-    $plugins = [
-        'contact-form-7/wp-contact-form-7.php' => [
-            'name' => 'Contact Form 7',
-            'description' => 'pour les formulaires de contact',
-            'categories' => ['Formulaire', 'Marketing'],
-        ],
-        'wp-umbrella/wp-umbrella.php' => [
-            'name' => 'WP Umbrella',
-            'description' => 'pour la maintenance',
-            'categories' => ['Maintenance'],
-        ],
-        'wordpress-seo/wp-seo.php' => [
-            'name' => 'Yoast SEO',
-            'description' => 'pour le référencement',
-            'categories' => ['SEO'],
-        ],
-        'updraftplus/updraftplus.php' => [
-            'name' => 'UpdraftPlus',
-            'description' => 'pour la sauvegarde',
-            'categories' => ['Sauvegarde'],
-        ],
-        'wp-super-cache/wp-cache.php' => [
-            'name' => 'WP Super Cache',
-            'description' => 'pour la performance',
-            'categories' => ['Performance'],
-        ],
-        'advanced-custom-fields/acf.php' => [
-            'name' => 'Advanced Custom Fields (free)',
-            'description' => 'pour les champs personnalisés',
-            'categories' => ['Gutenberg', 'Champs personnalisés'],
-        ],
-        'admin-menu-editor/admin-menu-editor.php' => [
-            'name' => 'Admin Menu Editor (free)',
-            'description' => 'pour personnaliser le menu',
-            'categories' => ['Administration'],
-        ],
-        'post-types-order/post-types-order.php' => [
-            'name' => 'Post Types Order',
-            'description' => 'pour personnaliser l\'ordre des types de contenu',
-            'categories' => ['Contenu'],
-        ],
-        'safe-svg/safe-svg.php' => [
-            'name' => 'Safe SVG',
-            'description' => '',
-            'categories' => ['Médias'],
-        ],
-        'wp-media-folder/wp-media-folder.php' => [
-            'name' => 'WP Media Folder (JoomUnited)',
-            'description' => '',
-            'categories' => ['Médias'],
-        ],
-        'advanced-custom-fields-pro/acf.php' => [
-            'name' => 'Advanced Custom Fields PRO',
-            'description' => '',
-            'categories' => ['Gutenberg', 'Champs personnalisés'],
-        ],
-        'admin-menu-editor-pro/admin-menu-editor.php' => [
-            'name' => 'Admin Menu Editor PRO',
-            'description' => '',
-            'categories' => ['Administration'],
-        ],
-        'gravityforms/gravityforms.php' => [
-            'name' => 'Gravity Forms',
-            'description' => '',
-            'categories' => ['Formulaire'],
-        ],
-        'wp-media-folder-pro/wp-media-folder.php' => [
-            'name' => 'WP Media Folder PRO',
-            'description' => '',
-            'categories' => ['Médias'],
-        ],
-    ];
+    $config_dir = __DIR__ . '/config';
+    $wp_plugins_config = $config_dir . '/plugins-wp.php';
+    $plugins = file_exists($wp_plugins_config) ? include $wp_plugins_config : [];
+    $plugins = apply_filters('pubpi_wp_plugins', $plugins);
 
     // Plugins GitHub (format: 'user/repo' => ['name' => 'Nom', 'main_file' => 'fichier-principal.php'])
-    $github_plugins = [
-        'NicolasCaen/up-gutenberg-query-filter' => [
-            'name' => 'Up Gutenberg Query Filter',
-            'description' => 'Plugin permettant de filtrer les boucles Query Loop.',
-            'categories' => ['Gutenberg', 'Filtres'],
-            'main_file' => '' // Auto-détection
-        ],
-        'NicolasCaen/up-binding-lorem' => [
-            'name' => 'Up Binding Lorem',
-            'description' => 'AJoute le block binding Lorem.',
-            'categories' => ['Gutenberg', 'Bindings'],
-            'main_file' => '' // Auto-détection
-        ],
-        'NicolasCaen/up-variation-generator' => [
-            'name' => 'Up Variation Generator',
-            'description' => '',
-            'categories' => ['Gutenberg', 'Variations'],
-            'main_file' => '' // Auto-détection
-        ],
-        'NicolasCaen/up-gutenberg-binding-collection' => [
-            'name' => 'Up Gutenberg Binding Collection',
-            'description' => '',
-            'categories' => ['Gutenberg', 'Bindings'],
-            'main_file' => '' // Auto-détection
-        ],
-        'NicolasCaen/up-gutenberg-bindings-interface' => [
-            'name' => 'Up Gutenberg Bindings Interface',
-            'description' => '',
-            'categories' => ['Gutenberg', 'Interface'],
-            'main_file' => '' // Auto-détection
-        ],
-        'NicolasCaen/up-gutenberg-metabox' => [
-            'name' => 'Up Gutenberg Metabox',
-            'description' => '',
-            'categories' => ['Gutenberg', 'Metabox'],
-            'main_file' => '' // Auto-détection
-        ],
-        'NicolasCaen/up-library-generator' => [
-            'name' => 'Up Library Generator',
-            'description' => '',
-            'categories' => ['Gutenberg', 'Outils'],
-            'main_file' => '' // Auto-détection
-        ],
-        'NicolasCaen/up-shortcodes-library' => [
-            'name' => 'Up Shortcodes Library',
-            'description' => '',
-            'categories' => ['Shortcodes'],
-            'main_file' => '' // Auto-détection
-        ],
-        'NicolasCaen/up-section-styles' => [
-            'name' => 'Up Section Styles',
-            'description' => '',
-            'categories' => ['Gutenberg', 'Styles'],
-            'main_file' => '' // Auto-détection
-        ],
-        'NicolasCaen/up-theme-generator' => [
-            'name' => 'Up Theme Generator',
-            'description' => '',
-            'categories' => ['Thème'],
-            'main_file' => '' // Auto-détection
-        ],
-        'NicolasCaen/up-gsap-animate' => [
-            'name' => 'Up GSAP Animate',
-            'description' => '',
-            'categories' => ['Animation'],
-            'main_file' => '' // Auto-détection
-        ],
-        'NicolasCaen/up-gsap-animate-2' => [
-            'name' => 'Up GSAP Animate 2',
-            'description' => '',
-            'categories' => ['Animation'],
-            'main_file' => '' // Auto-détection
-        ],
-        'NicolasCaen/up-wp-resize-admin-aside' => [
-            'name' => 'Up WP Resize Admin Aside',
-            'description' => '',
-            'categories' => ['Administration'],
-            'main_file' => '' // Auto-détection
-        ],
-    ];
+    $github_plugins_config = $config_dir . '/plugins-github.php';
+    $github_plugins = file_exists($github_plugins_config) ? include $github_plugins_config : [];
+    $github_plugins = apply_filters('pubpi_github_plugins', $github_plugins);
 
-    $github_features = [
-        'NicolasCaen/up-feature-custom-hooks' => [
-            'name' => 'Hooks personnalisés',
-            'description' => 'Ajoute des hooks utiles pour les thèmes.',
-            'file' => 'feature-hooks.php',
-            'categories' => ['Hooks', 'Thème'],
-            'branch' => 'Master',
-        ],
-        'NicolasCaen/up-feature-media-enhancements' => [
-            'name' => 'Améliorations médias',
-            'description' => 'Fonctions utilitaires pour la gestion des médias.',
-            'file' => 'media-enhancements.php',
-            'categories' => ['Médias'],
-            'branch' => 'Master',
-        ],
-    ];
+    $github_features_config = $config_dir . '/features-github.php';
+    $github_features = file_exists($github_features_config) ? include $github_features_config : [];
+    $github_features = apply_filters('pubpi_github_features', $github_features);
 
     // Bibliothèques de patterns via manifest.json (groupées par onglet)
     $manifest_tabs_config = __DIR__ . '/config/manifest-tabs.php';
@@ -1151,12 +993,9 @@ function pubpi_render_admin_page() {
     $github_manifest_tabs = apply_filters('pubpi_manifest_tabs', $github_manifest_tabs);
 
     // Thèmes GitHub (format: 'user/repo' => ['name' => 'Nom du thème'])
-    $github_themes = [
-        'NicolasCaen/ng1-base' => [
-            'name' => 'NG1 Base Theme',
-            'categories' => ['Thème', 'Starter'],
-        ],
-    ];
+    $github_themes_config = $config_dir . '/themes-github.php';
+    $github_themes = file_exists($github_themes_config) ? include $github_themes_config : [];
+    $github_themes = apply_filters('pubpi_github_themes', $github_themes);
 
     $wp_categories = pubpi_extract_categories($plugins);
     $github_plugin_categories = pubpi_extract_categories($github_plugins);
