@@ -10,6 +10,57 @@ if (!defined('ABSPATH')) {
     exit;
 }
 
+function pubpi_replace_marker_block($target_file, $block_key, $lines) {
+    $start = "/* ----- {$block_key} ----- */";
+    $end = "/* ----- {$block_key} fin ----- */";
+    $contents = file_exists($target_file) ? file_get_contents($target_file) : '';
+    if ($contents === false) return new WP_Error('pubpi_marker_read', 'Impossible de lire le fichier cible.');
+    $normalized = str_replace(["\r\n","\r"], "\n", (string)$contents);
+    $block = $start . "\n" . implode("\n", $lines) . "\n" . $end . "\n";
+    if (strpos($normalized, $start) === false || strpos($normalized, $end) === false) {
+        // Insert as in ensure: after <?php if present, else prepend
+        if (strpos(ltrim($normalized), "<?php") === 0) {
+            $phpPos = strpos($normalized, "<?php");
+            $after = strpos($normalized, "\n", $phpPos);
+            if ($after === false) { $after = $phpPos + 5; $normalized .= "\n"; }
+            $insertionPoint = $after + 1;
+            $new = substr($normalized, 0, $insertionPoint) . $block . substr($normalized, $insertionPoint);
+        } else {
+            $new = $block . $normalized;
+        }
+        if (!pubpi_write_file_with_fallback($target_file, $new)) return new WP_Error('pubpi_marker_write', 'Écriture du bloc impossible.');
+        return count($lines);
+    }
+    // Replace content between markers
+    $before = substr($normalized, 0, strpos($normalized, $start) + strlen($start));
+    $afterEndPos = strpos($normalized, $end);
+    $after = substr($normalized, $afterEndPos);
+    $new = $before . "\n" . implode("\n", $lines) . "\n" . $after;
+    if (!pubpi_write_file_with_fallback($target_file, $new)) return new WP_Error('pubpi_marker_write', 'Mise à jour du bloc impossible.');
+    return count($lines);
+}
+
+function pubpi_enqueue_admin_assets($hook) {
+    $page = isset($_GET['page']) ? sanitize_key($_GET['page']) : '';
+    if (!$page) {
+        return;
+    }
+    $allowed = array(
+        'bulk-plugin-installer',
+        'bulk-plugin-installer-manifest-docs',
+        'bulk-plugin-installer-api-docs',
+    );
+    if (!in_array($page, $allowed, true)) {
+        return;
+    }
+    wp_enqueue_style(
+        'pubpi-admin',
+        plugins_url('admin.css', __FILE__),
+        array(),
+        '1.0'
+    );
+}
+
 // =============================
 // Clean actions storage utilities
 // =============================
@@ -524,8 +575,23 @@ function pubpi_ensure_marker_block($target_file, $block_key, $lines) {
     }
     $block = $start . "\n" . implode("\n", $lines) . "\n" . $end . "\n";
     if (strpos($normalized, $start) === false || strpos($normalized, $end) === false) {
-        // prepend block
-        $new = $block . $normalized;
+        // Insert block
+        $new = '';
+        // If file starts with PHP tag, place block right after opening tag line
+        if (strpos(ltrim($normalized), "<?php") === 0) {
+            $phpPos = strpos($normalized, "<?php");
+            // Find the end of the line after <?php
+            $after = strpos($normalized, "\n", $phpPos);
+            if ($after === false) {
+                $after = $phpPos + 5; // after '<?php'
+                $normalized .= "\n"; // ensure newline exists
+            }
+            $insertionPoint = $after + 1; // start of next line
+            $new = substr($normalized, 0, $insertionPoint) . $block . substr($normalized, $insertionPoint);
+        } else {
+            // Default: prepend
+            $new = $block . $normalized;
+        }
         if (!pubpi_write_file_with_fallback($target_file, $new)) return new WP_Error('pubpi_marker_write', 'Écriture du bloc impossible.');
         return count($lines);
     }
@@ -585,7 +651,9 @@ function pubpi_run_generator_by_slug($slug) {
     }
 
     $exts = [];
-    $block_key = $cfg['type'];
+    $block_key = ($cfg['type'] === 'js_register' || $cfg['type'] === 'js_enqueue')
+        ? sanitize_title($cfg['slug'])
+        : $cfg['type'];
     if ($cfg['type'] === 'php_include') $exts = ['php'];
     if ($cfg['type'] === 'scss_import') $exts = ['scss'];
     if ($cfg['type'] === 'js_register' || $cfg['type'] === 'js_enqueue') $exts = ['js'];
@@ -642,24 +710,42 @@ function pubpi_run_generator_by_slug($slug) {
                 $handle_base = $cfg['handle'] !== '' ? sanitize_title($cfg['handle']) : 'pubpi-script';
                 $file_slug = sanitize_title(basename($abs, '.js'));
                 $handle = $handle_base . '-' . $file_slug;
-                $deps = isset($cfg['deps']) ? array_values(array_filter((array)$cfg['deps'])) : [];
-                $deps_php = "['" . implode("','", array_map('esc_js', $deps)) . "']";
-                $url = rtrim($base_uri, '/') . '/' . $rel_from_base;
+                $deps = isset($cfg['deps']) ? array_values(array_filter((array)$cfg['deps'], function($d){ return $d !== null && $d !== '';})) : [];
+                $deps_php = empty($deps)
+                    ? '[]'
+                    : "['" . implode("','", array_map('esc_js', $deps)) . "']";
+                // Build URL expression using WP functions depending on destination
+                if (($cfg['destination'] ?? 'theme') === 'theme') {
+                    $url_expr = "get_stylesheet_directory_uri() . '/" . $rel_from_base . "'";
+                } elseif (($cfg['destination'] ?? '') === 'plugins') {
+                    $url_expr = "content_url('/plugins/" . $rel_from_base . "')";
+                } else { // mu-plugins
+                    $url_expr = "content_url('/mu-plugins/" . $rel_from_base . "')";
+                }
                 if ($cfg['type'] === 'js_register') {
-                    $lines[] = "wp_register_script('{$handle}', '" . $url . "', {$deps_php}, null, " . (!empty($cfg['in_footer']) ? 'true' : 'false') . ");";
+                    $lines[] = "wp_register_script('{$handle}', " . $url_expr . ", {$deps_php}, null, " . (!empty($cfg['in_footer']) ? 'true' : 'false') . ");";
                 } else {
-                    $lines[] = "wp_enqueue_script('{$handle}', '" . $url . "', {$deps_php}, null, " . (!empty($cfg['in_footer']) ? 'true' : 'false') . ");";
+                    $lines[] = "wp_enqueue_script('{$handle}', " . $url_expr . ", {$deps_php}, null, " . (!empty($cfg['in_footer']) ? 'true' : 'false') . ");";
                 }
                 break;
         }
     }
 
-    // For JS, wrap with add_action to ensure execution
+    // For JS, generate named function wrapper using generator slug
     if ($cfg['type'] === 'js_register' || $cfg['type'] === 'js_enqueue') {
-        if (!empty($lines)) {
-            array_unshift($lines, "add_action('wp_enqueue_scripts', function() {" );
-            $lines[] = "}, 10);";
+        $func_base = isset($cfg['slug']) ? sanitize_title($cfg['slug']) : 'pubpi-gen';
+        $func_base = str_replace('-', '_', $func_base);
+        $func_name = $func_base . '_scripts';
+        $wrapped = [];
+        $wrapped[] = "add_action('wp_enqueue_scripts', '{$func_name}');";
+        $wrapped[] = "function {$func_name}() {";
+        $wrapped[] = "  //-- Script des block js ---------";
+        foreach ($lines as $ln) {
+            $wrapped[] = '  ' . $ln;
         }
+        $wrapped[] = "  //--------------------";
+        $wrapped[] = "}";
+        return pubpi_replace_marker_block($target_file, $block_key, $wrapped);
     }
 
     return pubpi_ensure_marker_block($target_file, $block_key, $lines);
@@ -939,6 +1025,7 @@ HTML;
 
 add_action('admin_menu', 'pubpi_add_admin_page');
 add_action('rest_api_init', 'pubpi_register_rest_routes');
+add_action('admin_enqueue_scripts', 'pubpi_enqueue_admin_assets');
 
 function pubpi_add_admin_page() {
     add_menu_page(
@@ -1271,11 +1358,10 @@ function pubpi_render_admin_page() {
 
     echo '<h3>Créer ou modifier un générateur</h3>';
     echo '<form method="post" class="pubpi-set-form" id="pubpi-generator-form">';
+    echo '<div class="pubpi-generator-layout" style="display:grid;grid-template-columns:1fr 320px;gap:16px;align-items:start;">';
     echo '<div class="pubpi-set-fields">';
-    echo '<label for="pubpi-gen-name">Nom</label>';
-    echo '<input type="text" id="pubpi-gen-name" name="pubpi_gen_name" class="regular-text" />';
-    echo '<label for="pubpi-gen-slug">Slug</label>';
-    echo '<input type="text" id="pubpi-gen-slug" name="pubpi_gen_slug" class="regular-text" />';
+
+    echo '<div class="pubpi-field" id="pubpi-field-type">';
     echo '<label for="pubpi-gen-type">Type</label>';
     echo '<select id="pubpi-gen-type" name="pubpi_gen_type" class="pubpi-set-select">';
     echo '<option value="php_include">PHP include</option>';
@@ -1283,22 +1369,70 @@ function pubpi_render_admin_page() {
     echo '<option value="js_register">JS register</option>';
     echo '<option value="js_enqueue">JS enqueue</option>';
     echo '</select>';
+    echo '<p class="description pubpi-help" id="pubpi-help-type"></p>';
+    echo '</div>';
+
+    echo '<div class="pubpi-field" id="pubpi-field-name">';
+    echo '<label for="pubpi-gen-name">Nom</label>';
+    echo '<input type="text" id="pubpi-gen-name" name="pubpi_gen_name" class="regular-text" />';
+    echo '<p class="description pubpi-help" id="pubpi-help-name"></p>';
+    echo '</div>';
+
+    echo '<div class="pubpi-field" id="pubpi-field-slug">';
+    echo '<label for="pubpi-gen-slug">Slug</label>';
+    echo '<input type="text" id="pubpi-gen-slug" name="pubpi_gen_slug" class="regular-text" />';
+    echo '<p class="description pubpi-help" id="pubpi-help-slug"></p>';
+    echo '</div>';
+
+    echo '<div class="pubpi-field" id="pubpi-field-dest">';
     echo '<label for="pubpi-gen-dest">Destination</label>';
     echo '<select id="pubpi-gen-dest" name="pubpi_gen_destination" class="pubpi-set-select">';
     echo '<option value="theme">Thème actif</option>';
     echo '<option value="mu-plugins">MU-Plugins</option>';
     echo '<option value="plugins">Plugins</option>';
     echo '</select>';
+    echo '<p class="description pubpi-help" id="pubpi-help-dest"></p>';
+    echo '</div>';
+
+    echo '<div class="pubpi-field" id="pubpi-field-source">';
     echo '<label for="pubpi-gen-source">Dossier source (relatif)</label>';
     echo '<input type="text" id="pubpi-gen-source" name="pubpi_gen_source" class="regular-text" placeholder="ex: assets/scss/blocks" />';
+    echo '<p class="description pubpi-help" id="pubpi-help-source"></p>';
+    echo '</div>';
+
+    echo '<div class="pubpi-field" id="pubpi-field-target">';
     echo '<label for="pubpi-gen-target">Fichier cible (relatif)</label>';
     echo '<input type="text" id="pubpi-gen-target" name="pubpi_gen_target" class="regular-text" placeholder="ex: assets/scss/root.scss ou inc/includes.php" />';
+    echo '<p class="description pubpi-help" id="pubpi-help-target"></p>';
+    echo '</div>';
+
+    echo '<div class="pubpi-field" id="pubpi-field-handle">';
     echo '<label for="pubpi-gen-handle">Handle (JS)</label>';
     echo '<input type="text" id="pubpi-gen-handle" name="pubpi_gen_handle" class="regular-text" placeholder="ex: theme-scripts" />';
+    echo '<p class="description pubpi-help" id="pubpi-help-handle"></p>';
+    echo '</div>';
+
+    echo '<div class="pubpi-field" id="pubpi-field-deps">';
     echo '<label for="pubpi-gen-deps">Dépendances (JS, CSV)</label>';
     echo '<input type="text" id="pubpi-gen-deps" name="pubpi_gen_deps" class="regular-text" placeholder="ex: jquery,wp-element" />';
+    echo '<p class="description pubpi-help" id="pubpi-help-deps"></p>';
+    echo '</div>';
+
+    echo '<div class="pubpi-field" id="pubpi-field-footer">';
     echo '<label><input type="checkbox" name="pubpi_gen_in_footer" id="pubpi-gen-in-footer" value="1" /> Charger en footer (JS)</label>';
+    echo '<p class="description pubpi-help" id="pubpi-help-footer"></p>';
+    echo '</div>';
+
     echo '<input type="hidden" id="pubpi-gen-original" name="pubpi_gen_original_slug" value="" />';
+    echo '</div>';
+
+    echo '<aside class="pubpi-generator-aside" style="background:#f6f7f7;border:1px solid #ccd0d4;padding:12px;">';
+    echo '<h4 style="margin-top:0;">Description du générateur</h4>';
+    echo '<div id="pubpi-gen-description" class="pubpi-gen-description" style="white-space:pre-line"></div>';
+    echo '<h4>Exemple généré</h4>';
+    echo '<pre id="pubpi-gen-example" class="pubpi-gen-example" style="background:#fff;border:1px solid #ccd0d4;padding:8px;overflow:auto;white-space:pre-wrap"></pre>';
+    echo '</aside>';
+
     echo '</div>';
     submit_button('Enregistrer le générateur', 'primary', 'pubpi_save_generator', false);
     echo '</form>';
@@ -1772,6 +1906,90 @@ function pubpi_render_admin_page() {
         var genFooterField = document.getElementById("pubpi-gen-in-footer");
         var genOriginalField = document.getElementById("pubpi-gen-original");
 
+        function setGeneratorHelp(type) {
+            var helps = {
+                type: {
+                    php_include: "Inclut tous les fichiers PHP trouvés dans le dossier source dans le fichier cible.",
+                    scss_import: "Ajoute des @import des partiels SCSS (fichiers commençant par _).",
+                    js_register: "Enregistre les scripts JS sans les charger (wp_register_script).",
+                    js_enqueue: "Enfile/charge les scripts JS (wp_enqueue_script)."
+                },
+                name: "Nom lisible pour retrouver le générateur.",
+                slug: "Identifiant unique (a-z0-9-).",
+                dest: "Où se trouve la base: Thème actif, MU-Plugins ou Plugins.",
+                source: {
+                    php_include: "Ex: inc/parts",
+                    scss_import: "Ex: assets/scss/blocks",
+                    js_register: "Ex: assets/js/modules",
+                    js_enqueue: "Ex: assets/js/entries"
+                },
+                target: {
+                    php_include: "Ex: inc/includes.php",
+                    scss_import: "Ex: assets/scss/root.scss",
+                    js_register: "Ex: functions/enqueue-scripts.php",
+                    js_enqueue: "Ex: functions/enqueue-scripts.php"
+                },
+                handle: {
+                    js_register: "Handle de base pour générer les handles par fichier (ex: theme-scripts).",
+                    js_enqueue: "Handle de base pour générer les handles par fichier (ex: theme-scripts)."
+                },
+                deps: {
+                    js_register: "CSV de dépendances (ex: jquery,wp-element)",
+                    js_enqueue: "CSV de dépendances (ex: jquery,wp-element)"
+                },
+                footer: {
+                    js_register: "Cochez pour charger en footer lorsque ces scripts seront enqueued.",
+                    js_enqueue: "Cochez pour charger en footer."
+                },
+                description: {
+                    php_include: "Génère des require_once vers chaque fichier PHP trouvé dans le dossier source dans le fichier cible.",
+                    scss_import: "Génère des @import vers chaque partiel SCSS (_*.scss) relatif au fichier cible.",
+                    js_register: "Génère un add_action('wp_enqueue_scripts', ...) qui appelle wp_register_script pour chaque fichier JS du dossier source.",
+                    js_enqueue: "Génère un add_action('wp_enqueue_scripts', ...) qui appelle wp_enqueue_script pour chaque fichier JS du dossier source."
+                },
+                example: {
+                    php_include: "/* ----- php_include ----- */\nrequire_once get_stylesheet_directory() . '/inc/parts/header.php';\nrequire_once get_stylesheet_directory() . '/inc/parts/footer.php';\n/* ----- php_include fin ----- */",
+                    scss_import: "/* ----- scss_import ----- */\n@import 'blocks/_button';\n@import 'components/_card';\n/* ----- scss_import fin ----- */",
+                    js_register: "/* ----- js_register ----- */\nadd_action('wp_enqueue_scripts', function() {\n  wp_register_script('theme-scripts-main', get_stylesheet_directory_uri() . '/assets/js/modules/main.js', ['wp-element'], null, true);\n});\n/* ----- js_register fin ----- */",
+                    js_enqueue: "/* ----- js_enqueue ----- */\nadd_action('wp_enqueue_scripts', function() {\n  wp_enqueue_script('theme-scripts-home', get_stylesheet_directory_uri() . '/assets/js/entries/home.js', ['wp-element'], null, true);\n});\n/* ----- js_enqueue fin ----- */"
+                }
+            };
+
+            var help = function(id) { return document.getElementById(id); };
+            if (help('pubpi-help-type')) help('pubpi-help-type').textContent = helps.type[type] || '';
+            if (help('pubpi-help-name')) help('pubpi-help-name').textContent = helps.name;
+            if (help('pubpi-help-slug')) help('pubpi-help-slug').textContent = helps.slug;
+            if (help('pubpi-help-dest')) help('pubpi-help-dest').textContent = helps.dest;
+            if (help('pubpi-help-source')) help('pubpi-help-source').textContent = (helps.source[type] || '');
+            if (help('pubpi-help-target')) help('pubpi-help-target').textContent = (helps.target[type] || '');
+            if (help('pubpi-help-handle')) help('pubpi-help-handle').textContent = (helps.handle[type] || '');
+            if (help('pubpi-help-deps')) help('pubpi-help-deps').textContent = (helps.deps[type] || '');
+            if (help('pubpi-help-footer')) help('pubpi-help-footer').textContent = (helps.footer[type] || '');
+
+            var aside = document.getElementById('pubpi-gen-description');
+            if (aside) aside.textContent = (helps.description[type] || '');
+            var ex = document.getElementById('pubpi-gen-example');
+            if (ex) ex.textContent = (helps.example[type] || '');
+        }
+
+        function showFieldsForType(type) {
+            var show = function(id, visible) { var el = document.getElementById(id); if (el) el.style.display = visible ? '' : 'none'; };
+            var commonVisible = ['pubpi-field-name','pubpi-field-slug','pubpi-field-dest','pubpi-field-source','pubpi-field-target'];
+            var jsVisible = ['pubpi-field-handle','pubpi-field-deps','pubpi-field-footer'];
+            var all = commonVisible.concat(jsVisible).concat(['pubpi-field-type']);
+            all.forEach(function(fid){ show(fid, false); });
+            commonVisible.concat(['pubpi-field-type']).forEach(function(fid){ show(fid, true); });
+            if (type === 'js_register' || type === 'js_enqueue') {
+                jsVisible.forEach(function(fid){ show(fid, true); });
+            }
+        }
+
+        function updateGeneratorUI() {
+            var type = genTypeField ? genTypeField.value : 'php_include';
+            showFieldsForType(type);
+            setGeneratorHelp(type);
+        }
+
         function normalizeGeneratorData(source) {
             if (!source) return null;
             if (typeof source === 'string') {
@@ -1804,6 +2022,7 @@ function pubpi_render_admin_page() {
             }
             if (genFooterField) genFooterField.checked = !!generator.in_footer;
             if (genOriginalField) genOriginalField.value = generator.slug || "";
+            updateGeneratorUI();
         }
 
         function resetGeneratorForm() {
@@ -1812,6 +2031,7 @@ function pubpi_render_admin_page() {
             if (genDepsField) genDepsField.value = "";
             if (genFooterField) genFooterField.checked = false;
             if (genOriginalField) genOriginalField.value = "";
+            updateGeneratorUI();
         }
 
         function fillCleanerForm(cleaner) {
@@ -1878,6 +2098,13 @@ function pubpi_render_admin_page() {
                 resetGeneratorForm();
             });
         }
+
+        if (genTypeField) {
+            genTypeField.addEventListener('change', updateGeneratorUI);
+        }
+
+        // Init on page load
+        updateGeneratorUI();
 
         if (cleanerLoadBtn && cleanerSelect) {
             cleanerLoadBtn.addEventListener("click", function() {

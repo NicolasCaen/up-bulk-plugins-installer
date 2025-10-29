@@ -1,0 +1,13 @@
+{
+    "slug": "root-cpt",
+    "name": "Root cpt",
+    "type": "php_include",
+    "destination": "theme",
+    "source_dir": "function\/cpt",
+    "target_file": "function\/cpt\/root.php",
+    "handle": "",
+    "deps": [],
+    "in_footer": false,
+    "created_at": "2025-10-27 09:33:37",
+    "updated_at": "2025-10-27 09:33:37"
+}

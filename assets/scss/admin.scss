@@ -1,0 +1,80 @@
+// Styles admin pour le générateur
+
+.pubpi-generator-layout {
+  display: grid;
+  grid-template-columns: 1fr 320px;
+  gap: 16px;
+  align-items: start;
+
+
+  @media (max-width: 1024px) {
+    grid-template-columns: 1fr;
+  }
+}
+.pubpi-set-form{
+  max-width: 900px;
+}
+.pubpi-set-fields {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px 16px;
+
+  @media (max-width: 900px) {
+    grid-template-columns: 1fr;
+  }
+}
+
+.pubpi-field {
+  display: block;
+}
+
+.pubpi-field label {
+  display: block;
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+
+.pubpi-field input.regular-text,
+.pubpi-field select.pubpi-set-select {
+  width: 100%;
+  max-width: 100%;
+}
+
+.pubpi-help.description {
+  margin: 4px 0 0;
+  color: #50575e;
+}
+
+.pubpi-generator-aside {
+  background: #f6f7f7;
+  border: 1px solid #ccd0d4;
+  padding: 12px;
+  position: sticky;
+  top: 24px;
+}
+
+.pubpi-gen-description {
+  white-space: pre-line;
+  margin-bottom: 8px;
+}
+
+.pubpi-gen-example {
+  background: #fff;
+  border: 1px solid #ccd0d4;
+  padding: 8px;
+  overflow: auto;
+  white-space: pre-wrap;
+  max-height: 320px;
+}
+
+// Focalisation et petits détails
+.pubpi-set-fields input:focus,
+.pubpi-set-fields select:focus {
+  outline: 2px solid #2271b1;
+  outline-offset: 0;
+}
+
+input[name="pubpi_save_generator"] {
+width: fit-content;
+}
+  
