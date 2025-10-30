@@ -1,5 +1,9 @@
 # Changelog
 
+## [1.5.1] - 2025-10-30
+- Harmonisation de la version du plugin et de la documentation pour la release 1.5.1.
+- Préparation du package en vue de la distribution.
+
 ## [1.5.0] - 2025-10-29
 - Normalisation du dossier d’installation GitHub: les archives sont désormais renommées en `wp-content/plugins/<repo>` (ou `wp-content/themes/<repo>`), au lieu de `Owner-Repo-<hash>`.
 - Détection renforcée du dossier extrait après dézippage (prend en compte les variations de nom GitHub et renomme correctement).
