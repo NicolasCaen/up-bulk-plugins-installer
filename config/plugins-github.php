@@ -8,6 +8,24 @@
 //     'main_file' => '' // Optionnel: laisser vide pour auto-détection
 // ]
 return [
+    'NicolasCaen/up-plugins-agency'=>[
+        'name' => 'Up Plugins Agency',
+        'description' => 'Regroupement des plugins développés par l\'agence. dans le gestionnaire de plugins.',
+        'categories' => ['Gutenberg', 'plugins'],
+        'main_file' => 'up-plugins-agency.php'
+    ],
+    'NicolasCaen/up-admin-menu'=>[
+        'name' => 'Up Admin Menu',
+        'description' => 'Simplifier l\'interface admin.',
+        'categories' => ['Gutenberg', 'Administration'],
+        'main_file' => ''
+    ],
+    'NicolasCaen/up-inline-icon-format'=>[
+        'name' => 'Up Inline Icon Format',
+        'description' => 'Plugin permettant de mettre des icônes inline.',
+        'categories' => ['Gutenberg', 'icons'],
+        'main_file' => 'up-inline-icon-format.php'
+    ],
     'NicolasCaen/up-gutenberg-query-filter' => [
         'name' => 'Up Gutenberg Query Filter',
         'description' => 'Plugin permettant de filtrer les boucles Query Loop.',

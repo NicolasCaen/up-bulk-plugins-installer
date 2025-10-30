@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.5.0] - 2025-10-29
+- Normalisation du dossier d’installation GitHub: les archives sont désormais renommées en `wp-content/plugins/<repo>` (ou `wp-content/themes/<repo>`), au lieu de `Owner-Repo-<hash>`.
+- Détection renforcée du dossier extrait après dézippage (prend en compte les variations de nom GitHub et renomme correctement).
+- Correction de configuration: validation des clés `user/repo` dans `config/plugins-github.php` pour un slug fiable et la détection du fichier principal.
+- Confirmation des statuts d’état: affichage « Actif » pour les extensions activées et « Mettre à jour » quand une release GitHub plus récente est disponible.
+- Petites améliorations et messages plus clairs pendant les étapes d’installation/mise à jour.
+
 ## [1.4] - 2025-10-21
 - Gestion des sets intégrée dans tous les tableaux (plugins, thèmes, fonctionnalités, patterns) avec destinations et chemins personnalisés.
 - Ajustements UI : colonne « Add set » uniformisée, regroupement des contrôles d’actions et styles revus.

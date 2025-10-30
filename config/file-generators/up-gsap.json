@@ -1,0 +1,16 @@
+{
+    "slug": "up-gsap",
+    "name": "Script gsap",
+    "type": "js_enqueue",
+    "destination": "theme",
+    "source_dir": "assets\/js\/gsap",
+    "target_file": "functions\/enqueue-gsap-scripts.php",
+    "handle": "gsap",
+    "deps": [
+        "gsap",
+        "gsap-scroll-trigger"
+    ],
+    "in_footer": true,
+    "created_at": "2025-10-29 12:15:16",
+    "updated_at": "2025-10-29 12:15:16"
+}

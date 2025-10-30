@@ -33,6 +33,7 @@ Installe, active et met à jour automatiquement une sélection de plugins, thèm
 - Page de documentation intégrée pour l’API REST et fichier `API.md` décrivant les endpoints disponibles.
 - Installation de fonctionnalités PHP GitHub directement dans `functions.php` (avec include automatique) ou dans `mu-plugins/`.
 - Support d’onglets multiples basés sur des `manifest.json` pour déployer des patterns front-end (fichiers JSON, CSS, JS, PHP, etc.) dans le thème actif.
+ - Normalisation des dossiers installés depuis GitHub: renommage automatique des archives extraites en `wp-content/plugins/<repo>` (ou `wp-content/themes/<repo>`).
 
 La page d’administration est disponible dans: `Tableau de bord > Installer Plugins`.
 
@@ -148,4 +149,4 @@ Pour les plugins GitHub, si le fichier principal n’est pas spécifié, le plug
 ---
 
 Auteur: GEHIN Nicolas
-Version du plugin: 1.4
+Version du plugin: 1.5.0
