@@ -1,5 +1,9 @@
 # Changelog
 
+## [1.5.2] - 2025-12-19
+- Ajout / mise à jour de dépôts GitHub dans la configuration (plugins, thèmes, fonctionnalités) pour l’installation et la mise à jour.
+- UI : réorganisation des onglets avec « Plugins GitHub » en premier et « Plugins WordPress.org » en second.
+
 ## [1.5.1] - 2025-10-30
 - Harmonisation de la version du plugin et de la documentation pour la release 1.5.1.
 - Préparation du package en vue de la distribution.
