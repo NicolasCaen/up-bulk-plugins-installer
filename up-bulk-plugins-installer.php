@@ -2,7 +2,7 @@
 /*
 Plugin Name: Up Bulk Plugin Installer
 Description: Installe, active et met à jour automatiquement une sélection de plugins et thèmes essentiels depuis WordPress.org ou GitHub.
-Version: 1.5.1
+Version: 1.5.2
 Author: GEHIN Nicolas
 */
 
@@ -1015,8 +1015,8 @@ function pubpi_render_admin_page() {
 
     echo '<div class="wrap"><h1>Installer & Mettre à jour des plugins et thèmes</h1>';
     echo '<h2 class="nav-tab-wrapper pubpi-tabs-nav">';
-    echo '<a href="#pubpi-tab-wp" class="nav-tab nav-tab-active">Plugins WordPress.org</a>';
-    echo '<a href="#pubpi-tab-github-plugins" class="nav-tab">Plugins GitHub</a>';
+    echo '<a href="#pubpi-tab-github-plugins" class="nav-tab nav-tab-active">Plugins GitHub</a>';
+    echo '<a href="#pubpi-tab-wp" class="nav-tab">Plugins WordPress.org</a>';
     echo '<a href="#pubpi-tab-github-themes" class="nav-tab">Thèmes GitHub</a>';
     foreach ($manifest_tabs as $manifest_key => $manifest_tab) {
         $manifest_tab_id = 'pubpi-tab-manifest-' . esc_attr(sanitize_title($manifest_key));
@@ -1029,7 +1029,7 @@ function pubpi_render_admin_page() {
     echo '</h2>';
 
     // Tab: WordPress.org
-    echo '<div id="pubpi-tab-wp" class="pubpi-tab-panel is-active">';
+    echo '<div id="pubpi-tab-wp" class="pubpi-tab-panel">';
     if (!empty($wp_categories)) {
         echo '<div class="pubpi-category-filters" data-target="#pubpi-wp-plugins">';
         echo '<button type="button" class="button pubpi-filter-btn active" data-category="__all">Tous</button>';
@@ -1362,7 +1362,7 @@ function pubpi_render_admin_page() {
     echo '</div>';
 
     // Tab: GitHub Plugins
-    echo '<div id="pubpi-tab-github-plugins" class="pubpi-tab-panel">';
+    echo '<div id="pubpi-tab-github-plugins" class="pubpi-tab-panel is-active">';
     if (!empty($github_plugin_categories)) {
         echo '<div class="pubpi-category-filters" data-target="#pubpi-github-plugins">';
         echo '<button type="button" class="button pubpi-filter-btn active" data-category="__all">Tous</button>';

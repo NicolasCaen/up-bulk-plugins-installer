@@ -149,4 +149,4 @@ Pour les plugins GitHub, si le fichier principal n’est pas spécifié, le plug
 ---
 
 Auteur: GEHIN Nicolas
-Version du plugin: 1.5.1
+Version du plugin: 1.5.2
